@@ -5,6 +5,9 @@ export const API_CONSTANTS = {
     EMAIL_OTP_AUTHENTICATE: "/api/auth/email-otp/authenticate",
     ME: "/api/auth/me",
   },
+  KYC: {
+    GET_KYCS: "/api/kycs",
+  },
 };
 
 export const REQUEST_TIMEOUT = 10000; // 10 seconds
