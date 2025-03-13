@@ -9,6 +9,7 @@ import {
   UserSession,
 } from "./interfaces/session.interface";
 import { KycService } from "../kyc/kyc.service";
+import { WalletService } from "../wallet/wallet.service";
 
 @Injectable()
 export class BotService {
@@ -19,7 +20,8 @@ export class BotService {
 
   constructor(
     private readonly authService: AuthService,
-    private readonly kycService: KycService
+    private readonly kycService: KycService,
+    private readonly walletService: WalletService
   ) {
     // Initialize bot with token from environment variables
     const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -66,6 +68,18 @@ export class BotService {
     this.bot.command("logout", this.handleLogoutCommand.bind(this));
     this.bot.command("profile", this.handleProfileCommand.bind(this));
     this.bot.command("kyc", this.handleKycStatusCommand.bind(this));
+
+    // Wallet Management Commands
+    this.bot.command("wallets", this.handleWalletsCommand.bind(this));
+    this.bot.command("balance", this.handleBalanceCommand.bind(this));
+    this.bot.command(
+      "setdefault",
+      this.handleSetDefaultWalletCommand.bind(this)
+    );
+    this.bot.command(
+      "defaultwallet",
+      this.handleDefaultWalletCommand.bind(this)
+    );
   }
 
   /**
@@ -99,11 +113,18 @@ export class BotService {
   private async handleHelpCommand(ctx: Context) {
     await ctx.reply(
       "Available commands:\n\n" +
+        "🚀 Getting Started\n" +
         "/start - Restart the bot\n" +
         "/login - Authenticate with your Copperx account\n" +
-        "/logout - End your current session\n" +
+        "/logout - End your current session\n\n" +
+        "👤 Profile & KYC\n" +
         "/profile - Get your user profile information\n" +
-        "/kyc - Check your KYC status\n" +
+        "/kyc - Check your KYC status\n\n" +
+        "💰 Wallet Management\n" +
+        "/wallets - List all your wallets\n" +
+        "/balance - View balances across all wallets\n" +
+        "/defaultwallet - Show your default wallet\n" +
+        "/setdefault - Set your default wallet\n\n" +
         "/help - Show this help message\n\n" +
         "Need more help? Join our community: https://t.me/copperxcommunity/2183"
     );
@@ -359,6 +380,282 @@ export class BotService {
       this.logger.error(`Error fetching KYC status: ${error.message}`);
       await ctx.reply(
         "Failed to fetch your KYC status. Please try again later."
+      );
+    }
+  }
+
+  /**
+   * Handle wallets command - List all wallets
+   */
+  private async handleWalletsCommand(ctx: Context) {
+    if (!ctx.from) {
+      await ctx.reply("An error occurred. Please try again.");
+      return;
+    }
+    const userId = ctx.from.id;
+
+    // Check if authenticated
+    if (!this.isAuthenticated(userId)) {
+      await ctx.reply(
+        "You need to be logged in to view your wallets. Use /login to authenticate."
+      );
+      return;
+    }
+
+    try {
+      const session = this.getSession(userId);
+      if (!session || !session.accessToken) {
+        await ctx.reply("Authentication error. Please /login again.");
+        return;
+      }
+
+      await ctx.reply("Fetching your wallets...");
+
+      // Get wallets using the wallet service
+      const wallets = await this.walletService.getWallets(session.accessToken);
+
+      if (wallets && wallets.length > 0) {
+        // Format wallet list
+        let walletsMessage = "💼 Your Wallets:\n\n";
+
+        wallets.forEach((wallet, index) => {
+          const networkName = this.walletService.formatNetworkName(
+            wallet.network
+          );
+          const formattedAddress = this.walletService.formatWalletAddress(
+            wallet.walletAddress
+          );
+
+          walletsMessage += `${index + 1}. ${networkName} ${wallet.isDefault ? "✅" : ""}\n`;
+          walletsMessage += `   Address: ${formattedAddress}\n`;
+          walletsMessage += `   Wallet ID: ${wallet.id}\n`;
+        });
+
+        walletsMessage +=
+          "To set a wallet as default, use /setdefault followed by the wallet ID.";
+
+        await ctx.reply(walletsMessage);
+      } else {
+        await ctx.reply(
+          "You don't have any wallets yet. Please create a wallet on the Copperx platform."
+        );
+      }
+    } catch (error) {
+      this.logger.error(`Error fetching wallets: ${error.message}`);
+      await ctx.reply("Failed to fetch your wallets. Please try again later.");
+    }
+  }
+
+  /**
+   * Handle balance command - View all wallet balances
+   */
+  private async handleBalanceCommand(ctx: Context) {
+    if (!ctx.from) {
+      await ctx.reply("An error occurred. Please try again.");
+      return;
+    }
+
+    const userId = ctx.from.id;
+
+    // Check if authenticated
+    if (!this.isAuthenticated(userId)) {
+      await ctx.reply(
+        "You need to be logged in to view your balances. Use /login to authenticate."
+      );
+      return;
+    }
+
+    try {
+      const session = this.getSession(userId);
+      if (!session || !session.accessToken) {
+        await ctx.reply("Authentication error. Please /login again.");
+        return;
+      }
+
+      await ctx.reply("Fetching your wallet balances...");
+
+      // Get wallet balances using the wallet service
+      const walletBalances = await this.walletService.getWalletBalances(
+        session.accessToken
+      );
+
+      if (walletBalances && walletBalances.length > 0) {
+        // Format balances by wallet
+        let balancesMessage = "💰 Your Wallet Balances:\n\n";
+
+        walletBalances.forEach((walletBalance, index) => {
+          const networkName = this.walletService.formatNetworkName(
+            walletBalance.network
+          );
+
+          balancesMessage += `${index + 1}. ${walletBalance.isDefault ? "✓ " : ""}${networkName}\n`;
+
+          if (walletBalance.balances && walletBalance.balances.length > 0) {
+            walletBalance.balances.forEach((balance) => {
+              balancesMessage += `   ${balance.symbol}: ${balance.balance}\n`;
+            });
+          } else {
+            balancesMessage += "   No token balances found\n";
+          }
+
+          balancesMessage += "\n";
+        });
+
+        await ctx.reply(balancesMessage);
+      } else {
+        await ctx.reply(
+          "No wallet balances found. Please ensure you have wallets set up on the Copperx platform."
+        );
+      }
+    } catch (error) {
+      this.logger.error(`Error fetching balances: ${error.message}`);
+      await ctx.reply(
+        "Failed to fetch your wallet balances. Please try again later."
+      );
+    }
+  }
+
+  /**
+   * Handle default wallet command - Show default wallet info
+   */
+  private async handleDefaultWalletCommand(ctx: Context) {
+    if (!ctx.from) {
+      await ctx.reply("An error occurred. Please try again.");
+      return;
+    }
+
+    const userId = ctx.from.id;
+
+    // Check if authenticated
+    if (!this.isAuthenticated(userId)) {
+      await ctx.reply(
+        "You need to be logged in to view your default wallet. Use /login to authenticate."
+      );
+      return;
+    }
+
+    try {
+      const session = this.getSession(userId);
+      if (!session || !session.accessToken) {
+        await ctx.reply("Authentication error. Please /login again.");
+        return;
+      }
+
+      await ctx.reply("Fetching your default wallet...");
+
+      // Get default wallet using the wallet service
+      const defaultWallet = await this.walletService.getDefaultWallet(
+        session.accessToken
+      );
+
+      if (defaultWallet) {
+        const networkName = this.walletService.formatNetworkName(
+          defaultWallet.network
+        );
+        const formattedAddress = this.walletService.formatWalletAddress(
+          defaultWallet.walletAddress
+        );
+
+        const walletMessage = [
+          "✅ Default Wallet",
+          "",
+          `Network: ${networkName}`,
+          `Address: ${formattedAddress}`,
+          `Wallet ID: ${defaultWallet.id}`,
+          `Created: ${new Date(defaultWallet.createdAt).toLocaleDateString()}`,
+          "",
+          "This wallet will be used for all transactions unless specified otherwise.",
+        ].join("\n");
+
+        await ctx.reply(walletMessage);
+      } else {
+        await ctx.reply(
+          "You don't have a default wallet set. Use /setdefault to set a default wallet."
+        );
+      }
+    } catch (error) {
+      this.logger.error(`Error fetching default wallet: ${error.message}`);
+      await ctx.reply(
+        "Failed to fetch your default wallet. Please try again later."
+      );
+    }
+  }
+
+  /**
+   * Handle set default wallet command
+   */
+  private async handleSetDefaultWalletCommand(ctx: Context) {
+    if (!ctx.from) {
+      await ctx.reply("An error occurred. Please try again.");
+      return;
+    }
+
+    const userId = ctx.from.id;
+    const text = ctx.message && "text" in ctx.message ? ctx.message.text : "";
+    const parts = text.split(" ");
+
+    // Check if wallet ID was provided
+    if (parts.length < 2) {
+      await ctx.reply(
+        "Please provide a wallet ID. Usage: /setdefault WALLET_ID\n\n" +
+          "You can get the wallet ID by using the /wallets command."
+      );
+      return;
+    }
+
+    const walletId = parts[1].trim();
+
+    // Check if authenticated
+    if (!this.isAuthenticated(userId)) {
+      await ctx.reply(
+        "You need to be logged in to set a default wallet. Use /login to authenticate."
+      );
+      return;
+    }
+
+    try {
+      const session = this.getSession(userId);
+      if (!session || !session.accessToken) {
+        await ctx.reply("Authentication error. Please /login again.");
+        return;
+      }
+
+      await ctx.reply(`Setting wallet ${walletId} as your default wallet...`);
+
+      // Set default wallet using the wallet service
+      const updatedWallet = await this.walletService.setDefaultWallet(
+        session.accessToken,
+        walletId
+      );
+
+      if (updatedWallet) {
+        const networkName = this.walletService.formatNetworkName(
+          updatedWallet.network
+        );
+        const formattedAddress = this.walletService.formatWalletAddress(
+          updatedWallet.walletAddress
+        );
+
+        const successMessage = [
+          "✅ Default Wallet Updated",
+          "",
+          `Network: ${networkName}`,
+          `Address: ${formattedAddress}`,
+          `Wallet ID: ${updatedWallet.id}`,
+          "",
+          "This wallet will now be used for all transactions unless specified otherwise.",
+        ].join("\n");
+
+        await ctx.reply(successMessage);
+      } else {
+        await ctx.reply(
+          "Failed to set default wallet. Please check the wallet ID and try again."
+        );
+      }
+    } catch (error) {
+      this.logger.error(`Error setting default wallet: ${error.message}`);
+      await ctx.reply(
+        "Failed to set your default wallet. Please check the wallet ID and try again later."
       );
     }
   }

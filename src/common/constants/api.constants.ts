@@ -8,6 +8,15 @@ export const API_CONSTANTS = {
   KYC: {
     GET_KYCS: "/api/kycs",
   },
+  WALLETS: {
+    GET_WALLETS: "/api/wallets",
+    GET_DEFAULT_WALLET: "/api/wallets/default",
+    SET_DEFAULT_WALLET: "/api/wallets/default",
+    GET_BALANCES: "/api/wallets/balances",
+  },
+  TRANSFERS: {
+    GET_TRANSFERS: "/api/transfers",
+  },
 };
 
 export const REQUEST_TIMEOUT = 10000; // 10 seconds
