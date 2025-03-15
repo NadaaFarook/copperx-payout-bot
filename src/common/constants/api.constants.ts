@@ -17,6 +17,10 @@ export const API_CONSTANTS = {
   TRANSFERS: {
     GET_TRANSFERS: "/api/transfers",
   },
+  NOTIFICATIONS: {
+    AUTH: "/api/notifications/auth",
+    TEST: "/api/notifications/test",
+  },
 };
 
 export const REQUEST_TIMEOUT = 10000; // 10 seconds

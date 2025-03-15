@@ -118,7 +118,8 @@ export class AuthCommandHandler {
     userId: number,
     otp: string,
     getSession: Function,
-    updateSession: Function
+    updateSession: Function,
+    enableNotifications?: Function
   ) {
     const session = getSession(userId);
 
@@ -141,25 +142,40 @@ export class AuthCommandHandler {
       const authResponse = await this.authService.verifyEmailOtp(dto);
 
       if (authResponse.accessToken) {
-        // Update session with token
-        updateSession(userId, {
-          step: AuthStep.AUTHENTICATED,
-          accessToken: authResponse.accessToken,
-          expireAt: authResponse.expireAt,
-          lastActivity: new Date(),
-        });
-
         // Get user information
         const userInfo = await this.authService.getAuthUser(
           authResponse.accessToken
         );
+
+        // Update session with token and organization ID
+        updateSession(userId, {
+          step: AuthStep.AUTHENTICATED,
+          accessToken: authResponse.accessToken,
+          expireAt: authResponse.expireAt,
+          organizationId: userInfo.organizationId,
+          lastActivity: new Date(),
+        });
+
+        // Enable notifications if function is provided
+        if (enableNotifications && userInfo.organizationId) {
+          const sendMessage = async (message: string) => {
+            if (ctx.telegram) {
+              await ctx.telegram.sendMessage(userId, message, {
+                parse_mode: "Markdown",
+              });
+            }
+          };
+
+          enableNotifications(userId, userInfo.organizationId, sendMessage);
+        }
 
         await ctx.reply(
           `✅ Authentication successful!\n\n` +
             `Welcome ${userInfo.firstName || userInfo.email}!\n\n` +
             `Email: ${userInfo.email}\n` +
             `KYC Status: ${userInfo.status || "Not started"}` +
-            `\n\nUse /profile to see your full profile or /kyc to check your KYC status.`
+            `\n\nUse /profile to see your full profile or /kyc to check your KYC status.` +
+            `\n\n🔔 You will now receive notifications for deposits.`
         );
       } else {
         await ctx.reply("Authentication failed. Please try again.");
@@ -215,6 +231,7 @@ export class AuthCommandHandler {
         `Status: ${userInfo.status || "Not set"}`,
         `Profile Type: ${userInfo.type || "Not set"}`,
         `Wallet Address: ${userInfo.walletAddress || "Not connected"}`,
+        `Notifications: ${session.notificationsEnabled ? "Enabled 🔔" : "Disabled 🔕"}`,
       ].join("\n");
 
       await ctx.reply(profileMessage);

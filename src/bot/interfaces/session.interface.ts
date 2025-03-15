@@ -1,3 +1,5 @@
+import { TransferSessionData } from "../handlers/transfer-command.handler";
+
 export enum AuthStep {
   NONE = "none",
   WAITING_FOR_EMAIL = "waiting_for_email",
@@ -12,6 +14,8 @@ export interface UserSession {
   sid?: string;
   expireAt?: string;
   lastActivity: Date;
+  organizationId?: string;
+  notificationsEnabled?: boolean;
 }
 
 export interface SessionData {

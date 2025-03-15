@@ -4,12 +4,15 @@ import {
   SessionData,
   UserSession,
 } from "./interfaces/session.interface";
+import { NotificationService } from "../notification/notification.service";
 
 @Injectable()
 export class SessionManager {
   private readonly logger = new Logger(SessionManager.name);
   private readonly sessions: SessionData = {};
   private readonly SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes
+
+  constructor(private readonly notificationService: NotificationService) {}
 
   /**
    * Get user session
@@ -41,6 +44,7 @@ export class SessionManager {
    * Reset user session
    */
   resetSession(userId: number) {
+    this.disableNotifications(userId);
     delete this.sessions[userId];
   }
 
@@ -61,6 +65,59 @@ export class SessionManager {
     }
 
     return true;
+  }
+
+  /**
+   * Enable notifications for a user
+   * @param userId Telegram user ID
+   * @param organizationId Organization ID
+   * @param sendMessage Function to send messages
+   */
+  enableNotifications(
+    userId: number,
+    organizationId: string,
+    sendMessage: (message: string) => Promise<void>
+  ): void {
+    const session = this.getSession(userId);
+    if (session && session.accessToken) {
+      this.logger.log(`Enabling notifications for user ${userId}`);
+
+      console.log("accessToken", session.accessToken);
+
+      // Initialize Pusher client for the user
+      this.notificationService.initializePusher(
+        userId,
+        session.accessToken,
+        organizationId,
+        sendMessage
+      );
+
+      // Update session
+      this.updateSession(userId, {
+        organizationId,
+        notificationsEnabled: true,
+      });
+    } else {
+      this.logger.error(
+        `Cannot enable notifications: User ${userId} not authenticated`
+      );
+    }
+  }
+
+  /**
+   * Disable notifications for a user
+   * @param userId Telegram user ID
+   */
+  disableNotifications(userId: number): void {
+    const session = this.getSession(userId);
+    if (session && session.notificationsEnabled) {
+      this.logger.log(`Disabling notifications for user ${userId}`);
+
+      // Update session
+      this.updateSession(userId, {
+        notificationsEnabled: false,
+      });
+    }
   }
 
   /**
