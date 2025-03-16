@@ -6,6 +6,14 @@ import { BotModule } from "./bot/bot.module";
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: [".env", ".env.local"],
+      load: [
+        () => ({
+          REDIS_URL: process.env.REDIS_URL || "redis://localhost:6379",
+          REDIS_TTL: parseInt(process.env.REDIS_TTL || "604800", 10), // 7 days in seconds
+          NODE_ENV: process.env.NODE_ENV || "development",
+        }),
+      ],
     }),
     BotModule,
   ],

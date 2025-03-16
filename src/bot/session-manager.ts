@@ -1,88 +1,89 @@
 import { Injectable, Logger } from "@nestjs/common";
-import {
-  AuthStep,
-  SessionData,
-  UserSession,
-} from "./interfaces/session.interface";
+import { AuthStep, UserSession } from "./interfaces/session.interface";
 import { NotificationService } from "../notification/notification.service";
+import { RedisSessionStore } from "../redis-session-store";
 
 @Injectable()
 export class SessionManager {
   private readonly logger = new Logger(SessionManager.name);
-  private readonly sessions: SessionData = {};
   private readonly SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes
+  private cleanupInterval: NodeJS.Timeout | null = null;
 
-  constructor(private readonly notificationService: NotificationService) {}
+  constructor(
+    private readonly notificationService: NotificationService,
+    private readonly redisSessionStore: RedisSessionStore
+  ) {}
 
   /**
    * Get user session
    */
-  getSession(userId: number): UserSession | null {
-    return this.sessions[userId] || null;
+  async getSession(userId: number): Promise<UserSession | null> {
+    this.logger.debug(`Getting session for user ${userId}`);
+    return this.redisSessionStore.getSession(userId);
   }
 
   /**
    * Update user session
    */
-  updateSession(userId: number, sessionData: Partial<UserSession>) {
-    this.sessions[userId] = {
-      ...this.sessions[userId],
+  async updateSession(userId: number, sessionData: Partial<UserSession>) {
+    await this.redisSessionStore.saveSession(userId, {
       ...sessionData,
-    };
+      lastActivity: new Date(),
+    });
   }
 
   /**
    * Update session last activity timestamp
    */
-  updateSessionActivity(userId: number) {
-    if (this.sessions[userId]) {
-      this.sessions[userId].lastActivity = new Date();
-    }
+  async updateSessionActivity(userId: number) {
+    await this.redisSessionStore.touchSession(userId);
   }
 
   /**
    * Reset user session
    */
-  resetSession(userId: number) {
-    this.disableNotifications(userId);
-    delete this.sessions[userId];
+  async resetSession(userId: number) {
+    await this.disableNotifications(userId);
+    await this.redisSessionStore.deleteSession(userId);
   }
 
   /**
    * Check if user is authenticated
    */
-  isAuthenticated(userId: number): boolean {
-    const session = this.getSession(userId);
+  async isAuthenticated(userId: number): Promise<boolean> {
+    this.logger.debug(`isAuthenticated called for user ${userId}`);
+    const session = await this.getSession(userId);
 
     if (!session || session.step !== AuthStep.AUTHENTICATED) {
+      this.logger.debug(
+        `User ${userId} not authenticated - session missing or wrong step`
+      );
       return false;
     }
 
     // Check if token is expired
     if (session.expireAt && new Date() > new Date(session.expireAt)) {
-      this.resetSession(userId);
+      this.logger.debug(`User ${userId} token expired`);
+      await this.resetSession(userId);
       return false;
     }
 
+    this.logger.debug(`User ${userId} is authenticated`);
     return true;
   }
 
   /**
    * Enable notifications for a user
-   * @param userId Telegram user ID
-   * @param organizationId Organization ID
-   * @param sendMessage Function to send messages
    */
-  enableNotifications(
+  async enableNotifications(
     userId: number,
     organizationId: string,
     sendMessage: (message: string) => Promise<void>
-  ): void {
-    const session = this.getSession(userId);
+  ): Promise<void> {
+    const session = await this.getSession(userId);
+
     if (session && session.accessToken) {
       this.logger.log(`Enabling notifications for user ${userId}`);
-
-      console.log("accessToken", session.accessToken);
 
       // Initialize Pusher client for the user
       this.notificationService.initializePusher(
@@ -93,7 +94,7 @@ export class SessionManager {
       );
 
       // Update session
-      this.updateSession(userId, {
+      await this.updateSession(userId, {
         organizationId,
         notificationsEnabled: true,
       });
@@ -106,44 +107,65 @@ export class SessionManager {
 
   /**
    * Disable notifications for a user
-   * @param userId Telegram user ID
    */
-  disableNotifications(userId: number): void {
-    const session = this.getSession(userId);
+  async disableNotifications(userId: number): Promise<void> {
+    const session = await this.getSession(userId);
+
     if (session && session.notificationsEnabled) {
       this.logger.log(`Disabling notifications for user ${userId}`);
-
-      // Update session
-      this.updateSession(userId, {
-        notificationsEnabled: false,
-      });
+      await this.updateSession(userId, { notificationsEnabled: false });
     }
   }
 
   /**
    * Clean up expired sessions
    */
-  cleanupSessions() {
+  async cleanupSessions() {
     const now = new Date().getTime();
+    const allSessions = await this.redisSessionStore.getAllSessions();
+    let expiredCount = 0;
 
-    Object.keys(this.sessions).forEach((key) => {
-      const userId = parseInt(key);
-      const session = this.sessions[userId];
-      const lastActivity = session.lastActivity.getTime();
+    for (const [userId, session] of allSessions.entries()) {
+      const lastActivity = new Date(session.lastActivity).getTime();
 
       // Remove sessions that have been inactive for the timeout period
       if (now - lastActivity > this.SESSION_TIMEOUT) {
         this.logger.debug(`Cleaning up expired session for user ${userId}`);
-        this.resetSession(userId);
+        await this.resetSession(userId);
+        expiredCount++;
       }
-    });
+    }
+
+    if (expiredCount > 0) {
+      this.logger.log(`Cleaned up ${expiredCount} expired sessions`);
+    }
   }
 
   /**
    * Start session cleanup interval
    */
   startCleanupInterval() {
-    setInterval(() => this.cleanupSessions(), 5 * 60 * 1000); // Check every 5 minutes
+    // Clear any existing interval
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+    }
+
+    // Check every 5 minutes
+    this.cleanupInterval = setInterval(
+      () => this.cleanupSessions(),
+      15 * 60 * 1000
+    );
     this.logger.log("Session cleanup interval started");
+  }
+
+  /**
+   * Stop session cleanup interval
+   */
+  stopCleanupInterval() {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+      this.logger.log("Session cleanup interval stopped");
+    }
   }
 }

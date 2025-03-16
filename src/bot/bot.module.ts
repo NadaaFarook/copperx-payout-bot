@@ -4,8 +4,10 @@ import { BotService } from "./bot.service";
 import { BotUpdate } from "./bot.update";
 import { TokenInterceptor } from "../common/interceptors/token.interceptor";
 import { KycService } from "../kyc/kyc.service";
-import { WalletService } from "src/wallet/wallet.service";
-import { AuthService } from "src/auth/auth.service";
+import { WalletService } from "../wallet/wallet.service";
+import { AuthService } from "../auth/auth.service";
+import { RedisSessionStore } from "../redis-session-store";
+import { SessionManager } from "./session-manager";
 
 @Module({
   imports: [
@@ -21,6 +23,8 @@ import { AuthService } from "src/auth/auth.service";
     KycService,
     WalletService,
     TokenInterceptor,
+    RedisSessionStore,
+    SessionManager,
   ],
   exports: [BotService],
 })
