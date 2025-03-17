@@ -1,9 +1,10 @@
-import { Context } from "telegraf";
+import { Context, Markup } from "telegraf";
 import { Logger } from "@nestjs/common";
 import { AuthService } from "src/auth/auth.service";
 import { LoginEmailOtpRequestDto } from "src/auth/dto/login-email-otp-request.dto";
 import { VerifyEmailOtpRequestDto } from "src/auth/dto/verify-email-otp-request.dto";
-import { AuthStep } from "../interfaces/session.interface";
+import { AuthStep } from "../bot.interface";
+import { AuthenticatedContext } from "src/auth-middleware";
 
 export class AuthCommandHandler {
   private readonly logger = new Logger(AuthCommandHandler.name);
@@ -18,120 +19,181 @@ export class AuthCommandHandler {
     updateSession: Function,
     isAuthenticated: Function
   ) {
-    if (!ctx.from) {
-      await ctx.reply("An error occurred. Please try again.");
-      return;
-    }
-    const userId = ctx.from.id;
+    const userId = ctx.from?.id;
 
-    // Check if already authenticated
-    if (isAuthenticated(userId)) {
+    const { authenticated } = await isAuthenticated(userId);
+
+    if (authenticated) {
       await ctx.reply(
-        "You are already logged in. Use /logout to end your session."
+        "You are already logged inn.",
+        Markup.inlineKeyboard([
+          [Markup.button.callback("Logout", "cmd_logout")],
+          [Markup.button.callback("Main Menu", "cmd_menu")],
+        ])
       );
       return;
     }
 
-    // Initialize or update session
-    updateSession(userId, {
+    await updateSession(userId, {
       step: AuthStep.WAITING_FOR_EMAIL,
       lastActivity: new Date(),
     });
 
-    await ctx.reply("Please enter your email address:");
+    await ctx.reply(
+      "🔑 *Login to your Copperx Account*\n\n" +
+        "Please enter your email address to receive a one-time verification code.",
+      { parse_mode: "Markdown" }
+    );
   }
 
   /**
-   * Handle logout command
+   * Handle logout command with confirmation
+   * Now works with session directly
    */
-  async handleLogoutCommand(
-    ctx: Context,
-    getSession: Function,
-    resetSession: Function
-  ) {
-    if (!ctx.from) {
+  async handleLogoutCommand(ctx: AuthenticatedContext) {
+    if (ctx.session && ctx.session.step === AuthStep.AUTHENTICATED) {
+      await ctx.reply(
+        "Are you sure you want to logout?",
+        Markup.inlineKeyboard([
+          [
+            Markup.button.callback("Yes", "logout_confirm"),
+            Markup.button.callback("No", "cmd_menu"),
+          ],
+        ])
+      );
+    } else {
+      await ctx.reply(
+        "You are not currently logged in.",
+        Markup.inlineKeyboard([
+          [Markup.button.callback("Login", "cmd_login")],
+          [Markup.button.callback("Main Menu", "cmd_menu")],
+        ])
+      );
+    }
+  }
+
+  /**
+   * Handle logout confirmation callback
+   */
+  async handleLogoutConfirmCallback(ctx: Context, resetSession: Function) {
+    try {
+      await ctx.answerCbQuery();
+
+      const userId = ctx.from?.id;
+
+      if (userId) {
+        await resetSession(userId);
+        await ctx.reply(
+          "You have been logged out successfully.",
+          Markup.inlineKeyboard([
+            [Markup.button.callback("Login Again", "cmd_login")],
+            [Markup.button.callback("Main Menu", "cmd_menu")],
+          ])
+        );
+      } else {
+        await ctx.reply("Error: User ID not found.");
+      }
+    } catch (error) {
+      this.logger.error(`Error handling logout confirmation: ${error.message}`);
       await ctx.reply("An error occurred. Please try again.");
+    }
+  }
+
+  /**
+   * Handle email input with clear validation
+   */
+  async handleEmailInput(ctx: Context, email: string, updateSession: Function) {
+    const userId = ctx.from?.id;
+
+    if (!userId) {
+      await ctx.reply("Error: User ID not found.");
       return;
     }
-    const userId = ctx.from.id;
 
-    const session = getSession(userId);
-    if (session && session.step === AuthStep.AUTHENTICATED) {
-      resetSession(userId);
-      await ctx.reply("You have been logged out successfully.");
-    } else {
-      await ctx.reply("You are not currently logged in.");
-    }
-  }
-
-  /**
-   * Handle email input
-   */
-  async handleEmailInput(
-    ctx: Context,
-    userId: number,
-    email: string,
-    updateSession: Function
-  ) {
-    // Basic email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      await ctx.reply("Please enter a valid email address:");
+      await ctx.reply(
+        "⚠️ Invalid email format. Please enter a valid email address:"
+      );
       return;
     }
 
     try {
-      // Request OTP
-      await ctx.reply("Sending OTP to your email...");
+      await ctx.reply("📤 Sending OTP to your email...");
 
       const dto: LoginEmailOtpRequestDto = { email };
       const response = await this.authService.requestEmailOtp(dto);
 
       if (response) {
-        // Update session
-        updateSession(userId, {
+        await updateSession(userId, {
           step: AuthStep.WAITING_FOR_OTP,
           email,
           sid: response.sid,
           lastActivity: new Date(),
         });
 
-        await ctx.reply("Please enter the OTP sent to your email:");
+        await ctx.reply(
+          "📩 Verification code sent!\n\n" +
+            "Please check your email and enter the 6-digit OTP code below."
+        );
       } else {
         await ctx.reply(
-          "Failed to send OTP. Please try again later or contact support."
+          "❌ Failed to send verification code.\n\n" +
+            "Please try again or contact support.",
+          Markup.inlineKeyboard([
+            [Markup.button.callback("Try Again", "cmd_login")],
+          ])
         );
       }
     } catch (error) {
       this.logger.error(`Error requesting OTP: ${error.message}`);
       await ctx.reply(
-        "An error occurred while requesting OTP. Please try again later."
+        "❌ An error occurred while requesting verification code.\n\n" +
+          "Please try again later.",
+        Markup.inlineKeyboard([
+          [Markup.button.callback("Try Again", "cmd_login")],
+          [Markup.button.callback("Main Menu", "cmd_menu")],
+        ])
       );
     }
   }
 
   /**
-   * Handle OTP input
+   * Handle OTP input with clear validation
    */
   async handleOtpInput(
     ctx: Context,
-    userId: number,
     otp: string,
     getSession: Function,
     updateSession: Function,
     enableNotifications?: Function
   ) {
-    const session = getSession(userId);
+    const userId = ctx.from?.id;
 
-    // Validate OTP format
+    if (!userId) {
+      await ctx.reply("❌ User ID not found. Please try again.");
+      return;
+    }
+
+    const session = await getSession(userId);
+
+    if (!session) {
+      await ctx.reply(
+        "❌ Session not found. Please start the login process again.",
+        Markup.inlineKeyboard([[Markup.button.callback("Login", "cmd_login")]])
+      );
+      return;
+    }
+
     if (!/^\d{6}$/.test(otp)) {
-      await ctx.reply("Please enter a valid 6-digit OTP:");
+      await ctx.reply(
+        "⚠️ Invalid OTP format. Please enter a valid 6-digit verification code."
+      );
       return;
     }
 
     try {
-      // Verify OTP
-      await ctx.reply("Verifying OTP...");
+      await ctx.reply("🔍 Verifying code...");
 
       const dto: VerifyEmailOtpRequestDto = {
         email: session?.email || "",
@@ -142,13 +204,11 @@ export class AuthCommandHandler {
       const authResponse = await this.authService.verifyEmailOtp(dto);
 
       if (authResponse.accessToken) {
-        // Get user information
         const userInfo = await this.authService.getAuthUser(
           authResponse.accessToken
         );
 
-        // Update session with token and organization ID
-        updateSession(userId, {
+        await updateSession(userId, {
           step: AuthStep.AUTHENTICATED,
           accessToken: authResponse.accessToken,
           expireAt: authResponse.expireAt,
@@ -156,7 +216,6 @@ export class AuthCommandHandler {
           lastActivity: new Date(),
         });
 
-        // Enable notifications if function is provided
         if (enableNotifications && userInfo.organizationId) {
           const sendMessage = async (message: string) => {
             if (ctx.telegram) {
@@ -170,75 +229,74 @@ export class AuthCommandHandler {
         }
 
         await ctx.reply(
-          `✅ Authentication successful!\n\n` +
+          `✅ *Login Successful!*\n\n` +
             `Welcome ${userInfo.firstName || userInfo.email}!\n\n` +
             `Email: ${userInfo.email}\n` +
             `KYC Status: ${userInfo.status || "Not started"}` +
-            `\n\nUse /profile to see your full profile or /kyc to check your KYC status.` +
-            `\n\n🔔 You will now receive notifications for deposits.`
+            `\n\n🔔 You will now receive notifications for deposits.`,
+          {
+            parse_mode: "Markdown",
+            ...Markup.inlineKeyboard([
+              [Markup.button.callback("View Profile", "cmd_profile")],
+              [Markup.button.callback("Main Menu", "cmd_menu")],
+            ]),
+          }
         );
       } else {
-        await ctx.reply("Authentication failed. Please try again.");
+        await ctx.reply(
+          "❌ Authentication failed. Please try again.",
+          Markup.inlineKeyboard([
+            [Markup.button.callback("Try Again", "cmd_login")],
+          ])
+        );
       }
     } catch (error) {
       this.logger.error(`Error verifying OTP: ${error.message}`);
       await ctx.reply(
-        "Failed to verify OTP. Please check your code and try again."
+        "❌ Failed to verify code. Please check your code and try again.",
+        Markup.inlineKeyboard([
+          [Markup.button.callback("Try Again", "cmd_login")],
+          [Markup.button.callback("Main Menu", "cmd_menu")],
+        ])
       );
     }
   }
+
   /**
-   * Handle profile command
+   * Handle profile command with enhanced formatting
+   * Now works with session directly
    */
-  async handleProfileCommand(
-    ctx: Context,
-    getSession: Function,
-    isAuthenticated: Function
-  ) {
-    if (!ctx.from) {
-      await ctx.reply("An error occurred. Please try again.");
-      return;
-    }
-    const userId = ctx.from.id;
-
-    // Check if authenticated
-    if (!isAuthenticated(userId)) {
-      await ctx.reply(
-        "You need to be logged in to view your profile. Use /login to authenticate."
-      );
-      return;
-    }
-
+  async handleProfileCommand(ctx: AuthenticatedContext) {
     try {
-      const session = getSession(userId);
-      if (!session || !session.accessToken) {
-        await ctx.reply("Authentication error. Please /login again.");
-        return;
-      }
+      await ctx.reply("🔍 Fetching your profile information...");
 
-      await ctx.reply("Fetching your profile information...");
+      const userInfo = await this.authService.getAuthUser(
+        ctx.session.accessToken
+      );
 
-      // Get user profile using the /me endpoint
-      const userInfo = await this.authService.getAuthUser(session.accessToken);
-
-      // Format the response
       const profileMessage = [
-        "🧑‍💼 User Profile",
+        "👤 *User Profile*",
         "",
-        `Email: ${userInfo.email}`,
-        `Name: ${userInfo.firstName || ""} ${userInfo.lastName || ""}`.trim(),
-        `Role: ${userInfo.role || "User"}`,
-        `Status: ${userInfo.status || "Not set"}`,
-        `Profile Type: ${userInfo.type || "Not set"}`,
-        `Wallet Address: ${userInfo.walletAddress || "Not connected"}`,
-        `Notifications: ${session.notificationsEnabled ? "Enabled 🔔" : "Disabled 🔕"}`,
+        `*Email:* ${userInfo.email}`,
+        `*Wallet Address:* ${userInfo.walletAddress || "Not connected"}`,
+        `*Notifications:* ${ctx.session.notificationsEnabled ? "Enabled 🔔" : "Disabled 🔕"}`,
       ].join("\n");
 
-      await ctx.reply(profileMessage);
+      await ctx.reply(profileMessage, {
+        parse_mode: "Markdown",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("Check KYC Status", "cmd_kyc")],
+          [Markup.button.callback("Main Menu", "cmd_menu")],
+        ]),
+      });
     } catch (error) {
       this.logger.error(`Error fetching profile: ${error.message}`);
       await ctx.reply(
-        "Failed to fetch your profile information. Please try again later."
+        "Failed to fetch your profile information. Please try again later.",
+        Markup.inlineKeyboard([
+          [Markup.button.callback("Try Again", "cmd_profile")],
+          [Markup.button.callback("Main Menu", "cmd_menu")],
+        ])
       );
     }
   }

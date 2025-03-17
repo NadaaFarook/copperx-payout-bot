@@ -6,8 +6,11 @@ import { TokenInterceptor } from "../common/interceptors/token.interceptor";
 import { KycService } from "../kyc/kyc.service";
 import { WalletService } from "../wallet/wallet.service";
 import { AuthService } from "../auth/auth.service";
+import { NotificationService } from "../notification/notification.service";
+import { TransferService } from "../transfer/transfer.service";
 import { RedisSessionStore } from "../redis-session-store";
 import { SessionManager } from "./session-manager";
+import { QuoteService } from "src/quote/quote.service";
 
 @Module({
   imports: [
@@ -22,6 +25,9 @@ import { SessionManager } from "./session-manager";
     BotUpdate,
     KycService,
     WalletService,
+    NotificationService,
+    TransferService,
+    QuoteService,
     TokenInterceptor,
     RedisSessionStore,
     SessionManager,

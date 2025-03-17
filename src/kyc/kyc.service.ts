@@ -1,15 +1,10 @@
 import { HttpService } from "@nestjs/axios";
 import { Injectable, Logger } from "@nestjs/common";
-import { AxiosError } from "axios";
-import { lastValueFrom } from "rxjs";
-import {
-  API_CONSTANTS,
-  REQUEST_TIMEOUT,
-} from "../common/constants/api.constants";
-import { ErrorHandler } from "../common/utils/error-handler.util";
+import { API_CONSTANTS } from "../common/constants/api.constants";
 import { TokenInterceptor } from "../common/interceptors/token.interceptor";
-import { KycDto } from "./kyc.interface";
+import { BaseHttpService } from "../common/services/base-http.service";
 import { PageDto } from "../common/dto/response.dto";
+import { KycDto } from "./kyc.interface";
 import { CustomerProfileType, KycStatus } from "./kyc.enum";
 
 export interface KycResponseDto extends PageDto {
@@ -17,13 +12,16 @@ export interface KycResponseDto extends PageDto {
 }
 
 @Injectable()
-export class KycService {
-  private readonly logger = new Logger(KycService.name);
+export class KycService extends BaseHttpService {
+  protected readonly logger = new Logger(KycService.name);
+  protected readonly baseUrl = API_CONSTANTS.BASE_URL;
 
   constructor(
-    private readonly httpService: HttpService,
-    private readonly tokenInterceptor: TokenInterceptor
-  ) {}
+    protected readonly httpService: HttpService,
+    protected readonly tokenInterceptor: TokenInterceptor
+  ) {
+    super(httpService, tokenInterceptor);
+  }
 
   /**
    * Get the KYC status of the authenticated user
@@ -31,31 +29,12 @@ export class KycService {
    * @returns KYC status information
    */
   async getKycStatus(token: string): Promise<KycResponseDto> {
-    try {
-      const url = `${API_CONSTANTS.BASE_URL}${API_CONSTANTS.KYC.GET_KYCS}`;
+    this.logger.log("Fetching KYC status information");
 
-      this.logger.log("Fetching KYC status information");
-
-      const config = this.tokenInterceptor.intercept(token, {
-        timeout: REQUEST_TIMEOUT,
-        params: {
-          page: 1,
-          limit: 10, // Get the most recent KYC submissions
-        },
-      });
-
-      const response = await lastValueFrom(
-        this.httpService.get<KycResponseDto>(url, config)
-      );
-
-      this.logger.debug("KYC information retrieved successfully");
-      return response.data;
-    } catch (error) {
-      if (error instanceof AxiosError) {
-        ErrorHandler.handleAxiosError(error);
-      }
-      ErrorHandler.handleGenericError(error);
-    }
+    return this.get<KycResponseDto>(API_CONSTANTS.KYC.GET_KYCS, token, {
+      page: 1,
+      limit: 10, // Get the most recent KYC submissions
+    });
   }
 
   /**
@@ -155,11 +134,7 @@ export class KycService {
         KycStatus.MANUAL_REVIEW,
       ].includes(statusLower as KycStatus)
     ) {
-      if (type.toLowerCase() === CustomerProfileType.INDIVIDUAL) {
-        return "Please ensure all your personal identification documents are clear and valid. You will be notified once the review is complete.";
-      } else {
-        return "Please ensure all your business documents are complete and valid. You will be notified once the review is complete.";
-      }
+      return "You will be notified once the review is complete.";
     }
 
     return "Please complete your KYC verification on the Copperx platform.";

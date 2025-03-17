@@ -1,12 +1,16 @@
 import { Context } from "telegraf";
 import { Logger } from "@nestjs/common";
-import { AuthStep } from "./interfaces/session.interface";
+import { AuthStep } from "./bot.interface";
 import { AuthCommandHandler } from "./handlers/auth-command.handler";
+import { TransferCommandHandler } from "./handlers/transfer-command.handler";
 
 export class MessageHandler {
   private readonly logger = new Logger(MessageHandler.name);
 
-  constructor(private readonly authCommandHandler: AuthCommandHandler) {}
+  constructor(
+    private readonly authCommandHandler: AuthCommandHandler,
+    private readonly transferCommandHandler: TransferCommandHandler
+  ) {}
 
   /**
    * Handle text messages based on current session state
@@ -15,36 +19,49 @@ export class MessageHandler {
     ctx: Context,
     getSession: Function,
     updateSessionActivity: Function,
-    updateSession: Function
+    updateSession: Function,
+    enableNotifications?: Function
   ) {
     if (!ctx.message || !("text" in ctx.message)) return;
 
-    if (!ctx.from) {
-      await ctx.reply("An error occurred. Please try again.");
-      return;
-    }
-
-    const userId = ctx.from.id;
+    const userId = ctx.from?.id;
     const messageText = ctx.message.text;
 
     // Ignore commands
     if (messageText.startsWith("/")) return;
 
-    const session = getSession(userId);
+    const session = await getSession(userId);
     if (!session) {
       await ctx.reply("Please use /login to start authentication.");
       return;
     }
 
     // Update last activity
-    updateSessionActivity(userId);
+    await updateSessionActivity(userId);
 
-    // Handle based on current step
+    // Check if in a transfer flow
+    if (session.transferSession) {
+      try {
+        const handled = await this.transferCommandHandler.handleTransferInput(
+          ctx,
+          messageText,
+          getSession,
+          updateSession
+        );
+
+        if (handled) return;
+      } catch (error) {
+        this.logger.error(`Error in transfer flow: ${error.message}`);
+        await ctx.reply("An error occurred. Please try again.");
+        return;
+      }
+    }
+
+    // Handle based on current auth step
     switch (session.step) {
       case AuthStep.WAITING_FOR_EMAIL:
         await this.authCommandHandler.handleEmailInput(
           ctx,
-          userId,
           messageText,
           updateSession
         );
@@ -53,16 +70,16 @@ export class MessageHandler {
       case AuthStep.WAITING_FOR_OTP:
         await this.authCommandHandler.handleOtpInput(
           ctx,
-          userId,
           messageText,
           getSession,
-          updateSession
+          updateSession,
+          enableNotifications
         );
         break;
 
       case AuthStep.AUTHENTICATED:
         await ctx.reply(
-          "You are already authenticated. Use /logout to end your session."
+          "You are authenticated! Use /help to see available commands."
         );
         break;
 

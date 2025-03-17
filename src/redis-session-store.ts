@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import Redis from "ioredis";
-import { UserSession } from "./bot/interfaces/session.interface";
+import { UserSession } from "./bot/bot.interface";
 
 @Injectable()
 export class RedisSessionStore implements OnModuleInit {

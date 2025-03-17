@@ -1,6 +1,11 @@
-import { Context } from "telegraf";
+import { Markup } from "telegraf";
 import { Logger } from "@nestjs/common";
 import { WalletService } from "src/wallet/wallet.service";
+import {
+  formatNetworkName,
+  formatWalletAddress,
+} from "src/common/utils/ui-formatter.util";
+import { AuthenticatedContext } from "src/auth-middleware";
 
 export class WalletCommandHandler {
   private readonly logger = new Logger(WalletCommandHandler.name);
@@ -8,211 +13,167 @@ export class WalletCommandHandler {
   constructor(private readonly walletService: WalletService) {}
 
   /**
-   * Handle wallets command - List all wallets
+   * Handle wallets command
    */
-  async handleWalletsCommand(
-    ctx: Context,
-    getSession: Function,
-    isAuthenticated: Function
-  ) {
-    if (!ctx.from) {
-      await ctx.reply("An error occurred. Please try again.");
-      return;
-    }
-    const userId = ctx.from.id;
-
-    // Check if authenticated
-    if (!isAuthenticated(userId)) {
-      await ctx.reply(
-        "You need to be logged in to view your wallets. Use /login to authenticate."
-      );
-      return;
-    }
-
+  async handleWalletsCommand(ctx: AuthenticatedContext) {
     try {
-      const session = getSession(userId);
-      if (!session || !session.accessToken) {
-        await ctx.reply("Authentication error. Please /login again.");
-        return;
-      }
+      await ctx.reply("💼 Fetching your wallets...");
 
-      await ctx.reply("Fetching your wallets...");
-
-      // Get wallets using the wallet service
-      const wallets = await this.walletService.getWallets(session.accessToken);
+      const wallets = await this.walletService.getWallets(
+        ctx.session.accessToken
+      );
 
       if (wallets && wallets.length > 0) {
-        // Format wallet list
-        let walletsMessage = "💼 Your Wallets:\n\n";
+        let walletsMessage = "💼 *Your Wallets:*\n\n";
 
         wallets.forEach((wallet, index) => {
-          const networkName = this.walletService.formatNetworkName(
-            wallet.network
-          );
-          const formattedAddress = this.walletService.formatWalletAddress(
-            wallet.walletAddress
-          );
+          const networkName = formatNetworkName(wallet.network);
+          const formattedAddress = formatWalletAddress(wallet.walletAddress);
 
-          walletsMessage += `${index + 1}. ${networkName} ${wallet.isDefault ? "✅" : ""}\n`;
-          walletsMessage += `   Address: ${formattedAddress}\n`;
-          walletsMessage += `   Wallet ID: ${wallet.id}\n`;
+          walletsMessage += `*${index + 1}. ${networkName}* ${wallet.isDefault ? "✅" : ""}\n`;
+          walletsMessage += `   *Address:* \`${formattedAddress}\`\n`;
+          walletsMessage += `   *Wallet ID:* \`${wallet.id}\`\n\n`;
         });
 
-        walletsMessage +=
-          "To set a wallet as default, use /setdefault followed by the wallet ID.";
+        const setDefaultButtons = wallets
+          .filter((wallet) => !wallet.isDefault)
+          .map((wallet) => {
+            const networkName = formatNetworkName(wallet.network);
+            const label = `Set ${networkName} as Default${wallet.isDefault ? " ✅" : ""}`;
+            return [Markup.button.callback(label, `setdefault_${wallet.id}`)];
+          });
 
-        await ctx.reply(walletsMessage);
+        setDefaultButtons.push([
+          Markup.button.callback("Check Balances", "cmd_balance"),
+          Markup.button.callback("Main Menu", "cmd_menu"),
+        ]);
+
+        await ctx.reply(walletsMessage, {
+          parse_mode: "Markdown",
+          ...Markup.inlineKeyboard(setDefaultButtons),
+        });
       } else {
         await ctx.reply(
-          "You don't have any wallets yet. Please create a wallet on the Copperx platform."
+          "You don't have any wallets yet. Please create a wallet on the Copperx platform.",
+          Markup.inlineKeyboard([
+            [Markup.button.url("Go to Copperx Platform", "https://copperx.io")],
+            [Markup.button.callback("Main Menu", "cmd_menu")],
+          ])
         );
       }
     } catch (error) {
       this.logger.error(`Error fetching wallets: ${error.message}`);
-      await ctx.reply("Failed to fetch your wallets. Please try again later.");
+      await ctx.reply(
+        "Failed to fetch your wallets. Please try again later.",
+        Markup.inlineKeyboard([
+          [Markup.button.callback("Try Again", "cmd_wallets")],
+          [Markup.button.callback("Main Menu", "cmd_menu")],
+        ])
+      );
     }
   }
 
   /**
-   * Handle default wallet command - Show default wallet info
+   * Handle default wallet command with inline options
    */
-  async handleDefaultWalletCommand(
-    ctx: Context,
-    getSession: Function,
-    isAuthenticated: Function
-  ) {
-    if (!ctx.from) {
-      await ctx.reply("An error occurred. Please try again.");
-      return;
-    }
-
-    const userId = ctx.from.id;
-
-    // Check if authenticated
-    if (!isAuthenticated(userId)) {
-      await ctx.reply(
-        "You need to be logged in to view your default wallet. Use /login to authenticate."
-      );
-      return;
-    }
-
+  async handleDefaultWalletCommand(ctx: AuthenticatedContext) {
     try {
-      const session = getSession(userId);
-      if (!session || !session.accessToken) {
-        await ctx.reply("Authentication error. Please /login again.");
-        return;
-      }
+      await ctx.reply("🔍 Fetching your default wallet...");
 
-      await ctx.reply("Fetching your default wallet...");
-
-      // Get default wallet using the wallet service
       const defaultWallet = await this.walletService.getDefaultWallet(
-        session.accessToken
+        ctx.session.accessToken
       );
 
       if (defaultWallet) {
-        const networkName = this.walletService.formatNetworkName(
-          defaultWallet.network
-        );
-        const formattedAddress = this.walletService.formatWalletAddress(
+        const networkName = formatNetworkName(defaultWallet.network);
+        const formattedAddress = formatWalletAddress(
           defaultWallet.walletAddress
         );
 
         const walletMessage = [
-          "✅ Default Wallet",
+          "✅ *Default Wallet*",
           "",
-          `Network: ${networkName}`,
-          `Address: ${formattedAddress}`,
-          `Wallet ID: ${defaultWallet.id}`,
-          `Created: ${new Date(defaultWallet.createdAt).toLocaleDateString()}`,
+          `*Network:* ${networkName}`,
+          `*Address:* \`${formattedAddress}\``,
+          `*Wallet ID:* \`${defaultWallet.id}\``,
+          `*Created:* ${new Date(defaultWallet.createdAt).toLocaleDateString()}`,
           "",
-          "This wallet will be used for all transactions unless specified otherwise.",
+          "_This wallet will be used for all transactions unless specified otherwise._",
         ].join("\n");
 
-        await ctx.reply(walletMessage);
+        await ctx.reply(walletMessage, {
+          parse_mode: "Markdown",
+          ...Markup.inlineKeyboard([
+            [
+              Markup.button.callback("Check Balance", "cmd_balance"),
+              Markup.button.callback("All Wallets", "cmd_wallets"),
+            ],
+            [Markup.button.callback("Main Menu", "cmd_menu")],
+          ]),
+        });
       } else {
         await ctx.reply(
-          "You don't have a default wallet set. Use /setdefault to set a default wallet."
+          "You don't have a default wallet set.",
+          Markup.inlineKeyboard([
+            [Markup.button.callback("View All Wallets", "cmd_wallets")],
+            [Markup.button.callback("Main Menu", "cmd_menu")],
+          ])
         );
       }
     } catch (error) {
       this.logger.error(`Error fetching default wallet: ${error.message}`);
       await ctx.reply(
-        "Failed to fetch your default wallet. Please try again later."
+        "Failed to fetch your wallet balances. Please try again later.",
+        Markup.inlineKeyboard([
+          [Markup.button.callback("Try Again", "cmd_balance")],
+          [Markup.button.callback("Main Menu", "cmd_menu")],
+        ])
       );
     }
   }
 
   /**
-   * Handle set default wallet command
+   * Handle set default wallet from callback
    */
-  async handleSetDefaultWalletCommand(
-    ctx: Context,
-    getSession: Function,
-    isAuthenticated: Function
+  async handleSetDefaultWalletCallback(
+    ctx: AuthenticatedContext,
+    walletId: string
   ) {
-    if (!ctx.from) {
-      await ctx.reply("An error occurred. Please try again.");
-      return;
-    }
-
-    const userId = ctx.from.id;
-    const text = ctx.message && "text" in ctx.message ? ctx.message.text : "";
-    const parts = text.split(" ");
-
-    // Check if wallet ID was provided
-    if (parts.length < 2) {
-      await ctx.reply(
-        "Please provide a wallet ID. Usage: /setdefault WALLET_ID\n\n" +
-          "You can get the wallet ID by using the /wallets command."
-      );
-      return;
-    }
-
-    const walletId = parts[1].trim();
-
-    // Check if authenticated
-    if (!isAuthenticated(userId)) {
-      await ctx.reply(
-        "You need to be logged in to set a default wallet. Use /login to authenticate."
-      );
-      return;
-    }
-
     try {
-      const session = getSession(userId);
-      if (!session || !session.accessToken) {
-        await ctx.reply("Authentication error. Please /login again.");
-        return;
-      }
+      await ctx.answerCbQuery();
 
       await ctx.reply(`Setting wallet ${walletId} as your default wallet...`);
 
-      // Set default wallet using the wallet service
       const updatedWallet = await this.walletService.setDefaultWallet(
-        session.accessToken,
+        ctx.session.accessToken,
         walletId
       );
 
       if (updatedWallet) {
-        const networkName = this.walletService.formatNetworkName(
-          updatedWallet.network
-        );
-        const formattedAddress = this.walletService.formatWalletAddress(
+        const networkName = formatNetworkName(updatedWallet.network);
+        const formattedAddress = formatWalletAddress(
           updatedWallet.walletAddress
         );
 
         const successMessage = [
-          "✅ Default Wallet Updated",
+          "✅ *Default Wallet Updated*",
           "",
-          `Network: ${networkName}`,
-          `Address: ${formattedAddress}`,
-          `Wallet ID: ${updatedWallet.id}`,
+          `*Network:* ${networkName}`,
+          `*Address:* \`${formattedAddress}\``,
+          `*Wallet ID:* \`${updatedWallet.id}\``,
           "",
-          "This wallet will now be used for all transactions unless specified otherwise.",
+          "_This wallet will now be used for all transactions unless specified otherwise._",
         ].join("\n");
 
-        await ctx.reply(successMessage);
+        await ctx.reply(successMessage, {
+          parse_mode: "Markdown",
+          ...Markup.inlineKeyboard([
+            [
+              Markup.button.callback("View All Wallets", "cmd_wallets"),
+              Markup.button.callback("Main Menu", "cmd_menu"),
+            ],
+          ]),
+        });
       } else {
         await ctx.reply(
           "Failed to set default wallet. Please check the wallet ID and try again."
@@ -227,56 +188,27 @@ export class WalletCommandHandler {
   }
 
   /**
-   * Handle wallet balance command
+   * Handle wallet balance command with enhanced formatting
    */
-  async handleWalletBalanceCommand(
-    ctx: Context,
-    getSession: Function,
-    isAuthenticated: Function
-  ) {
-    if (!ctx.from) {
-      await ctx.reply("An error occurred. Please try again.");
-      return;
-    }
-
-    const userId = ctx.from.id;
-
-    // Check if authenticated
-    if (!isAuthenticated(userId)) {
-      await ctx.reply(
-        "You need to be logged in to view your balances. Use /login to authenticate."
-      );
-      return;
-    }
-
+  async handleWalletBalanceCommand(ctx: AuthenticatedContext) {
     try {
-      const session = getSession(userId);
-      if (!session || !session.accessToken) {
-        await ctx.reply("Authentication error. Please /login again.");
-        return;
-      }
+      await ctx.reply("💰 Fetching your wallet balances...");
 
-      await ctx.reply("Fetching your wallet balances...");
-
-      // Get wallet balances using the wallet service
       const walletBalances = await this.walletService.getWalletBalances(
-        session.accessToken
+        ctx.session.accessToken
       );
 
       if (walletBalances && walletBalances.length > 0) {
-        // Format balances by wallet
-        let balancesMessage = "💰 Your Wallet Balances:\n\n";
+        let balancesMessage = "💰 *Your Wallet Balances:*\n\n";
 
         walletBalances.forEach((walletBalance, index) => {
-          const networkName = this.walletService.formatNetworkName(
-            walletBalance.network
-          );
+          const networkName = formatNetworkName(walletBalance.network);
 
-          balancesMessage += `${index + 1}. ${walletBalance.isDefault ? "✓ " : ""}${networkName}\n`;
+          balancesMessage += `*${index + 1}. ${networkName} ${walletBalance.isDefault ? "✅" : ""}*\n`;
 
           if (walletBalance.balances && walletBalance.balances.length > 0) {
             walletBalance.balances.forEach((balance) => {
-              balancesMessage += `   ${balance.symbol}: ${balance.balance}\n`;
+              balancesMessage += `   ${balance.balance} ${balance.symbol}\n`;
             });
           } else {
             balancesMessage += "   No token balances found\n";
@@ -285,10 +217,21 @@ export class WalletCommandHandler {
           balancesMessage += "\n";
         });
 
-        await ctx.reply(balancesMessage);
+        await ctx.reply(balancesMessage, {
+          parse_mode: "Markdown",
+          ...Markup.inlineKeyboard([
+            Markup.button.callback("Send Funds", "menu_send"),
+            Markup.button.callback("Withdraw", "cmd_withdraw"),
+            Markup.button.callback("Main Menu", "cmd_menu"),
+          ]),
+        });
       } else {
         await ctx.reply(
-          "No wallet balances found. Please ensure you have wallets set up on the Copperx platform."
+          "No wallet balances found. Please ensure you have wallets set up on the Copperx platform.",
+          Markup.inlineKeyboard([
+            [Markup.button.callback("View Wallets", "cmd_wallets")],
+            [Markup.button.callback("Main Menu", "cmd_menu")],
+          ])
         );
       }
     } catch (error) {

@@ -8,7 +8,6 @@ async function bootstrap() {
   try {
     const app = await NestFactory.create(AppModule);
 
-    // Apply global validation pipe
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -17,10 +16,8 @@ async function bootstrap() {
       })
     );
 
-    // Enable CORS
     app.enableCors();
 
-    // Start the application
     const port = process.env.PORT || 3000;
     await app.listen(port);
 

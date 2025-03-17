@@ -1,4 +1,4 @@
-import { TransferSessionData } from "../handlers/transfer-command.handler";
+import { TransferSessionData } from "src/transfer/transfer.interface";
 
 export enum AuthStep {
   NONE = "none",
@@ -16,6 +16,7 @@ export interface UserSession {
   lastActivity: Date;
   organizationId?: string;
   notificationsEnabled?: boolean;
+  transferSession?: TransferSessionData;
 }
 
 export interface SessionData {

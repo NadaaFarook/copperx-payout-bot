@@ -1,29 +1,26 @@
 import { HttpService } from "@nestjs/axios";
 import { Injectable, Logger } from "@nestjs/common";
-import { lastValueFrom } from "rxjs";
 import Pusher from "pusher-js";
-import {
-  API_CONSTANTS,
-  REQUEST_TIMEOUT,
-} from "../common/constants/api.constants";
+import { API_CONSTANTS } from "../common/constants/api.constants";
 import { TokenInterceptor } from "../common/interceptors/token.interceptor";
+import { BaseHttpService } from "../common/services/base-http.service";
 import { NotificationAuthDto } from "./notification.dto";
 import {
   NotificationAuthResponseDto,
   PusherNotificationInterface,
 } from "./notification.interface";
-import { TimeFormatterService } from "src/common/utils/time-formatter.util";
+import { formatDateTime } from "../common/utils/ui-formatter.util";
 
 @Injectable()
-export class NotificationService {
-  private readonly logger = new Logger(NotificationService.name);
+export class NotificationService extends BaseHttpService {
+  protected readonly logger = new Logger(NotificationService.name);
+  protected readonly baseUrl = API_CONSTANTS.BASE_URL;
 
   constructor(
-    private readonly httpService: HttpService,
-    private readonly tokenInterceptor: TokenInterceptor,
-    private readonly formatTime: TimeFormatterService
+    protected readonly httpService: HttpService,
+    protected readonly tokenInterceptor: TokenInterceptor
   ) {
-    this.formatTime = new TimeFormatterService();
+    super(httpService, tokenInterceptor);
   }
 
   /**
@@ -37,16 +34,11 @@ export class NotificationService {
     dto: NotificationAuthDto
   ): Promise<NotificationAuthResponseDto> {
     try {
-      const url = `${API_CONSTANTS.BASE_URL}${API_CONSTANTS.NOTIFICATIONS.AUTH}`;
-
-      const config = this.tokenInterceptor.intercept(token, {
-        timeout: REQUEST_TIMEOUT,
-      });
-
-      const response = await lastValueFrom(
-        this.httpService.post<NotificationAuthResponseDto>(url, dto, config)
+      return this.post<NotificationAuthResponseDto>(
+        API_CONSTANTS.NOTIFICATIONS.AUTH,
+        dto,
+        token
       );
-      return response.data;
     } catch (error) {
       this.logger.error(
         `Failed to authenticate with notification service: ${error.message}`
@@ -71,7 +63,6 @@ export class NotificationService {
     try {
       this.logger.log(`Initializing Pusher client for user ${userId}`);
 
-      // Initialize Pusher client
       const pusherKey = process.env.PUSHER_KEY as string;
       const pusherCluster = process.env.PUSHER_CLUSTER as string;
 
@@ -80,13 +71,11 @@ export class NotificationService {
         authorizer: (channel) => ({
           authorize: async (socketId, callback) => {
             try {
-              // Create auth DTO
               const authDto: NotificationAuthDto = {
                 socket_id: socketId,
                 channel_name: channel.name,
               };
 
-              // Authenticate with API
               const response = await this.authenticate(token, authDto);
 
               if (response) {
@@ -148,7 +137,7 @@ export class NotificationService {
         `Amount: ${data.amount} ${data.currency}\n` +
         `Network: ${data.metadata.network}\n` +
         `Tx: ${data.metadata.txHash}\n` +
-        `\nTimestamp: ${this.formatTime.formatDateTime(data.timestamp)}`;
+        `\nTimestamp: ${formatDateTime(data.timestamp)}`;
 
       await sendMessage(message);
     } catch (error) {

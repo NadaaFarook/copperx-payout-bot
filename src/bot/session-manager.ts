@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { AuthStep, UserSession } from "./interfaces/session.interface";
+import { AuthStep, UserSession } from "./bot.interface";
 import { NotificationService } from "../notification/notification.service";
 import { RedisSessionStore } from "../redis-session-store";
 
@@ -18,7 +18,6 @@ export class SessionManager {
    * Get user session
    */
   async getSession(userId: number): Promise<UserSession | null> {
-    this.logger.debug(`Getting session for user ${userId}`);
     return this.redisSessionStore.getSession(userId);
   }
 
@@ -50,26 +49,29 @@ export class SessionManager {
   /**
    * Check if user is authenticated
    */
-  async isAuthenticated(userId: number): Promise<boolean> {
-    this.logger.debug(`isAuthenticated called for user ${userId}`);
+  async isAuthenticated(userId: number): Promise<{
+    authenticated: boolean;
+    session?: UserSession;
+  }> {
     const session = await this.getSession(userId);
 
     if (!session || session.step !== AuthStep.AUTHENTICATED) {
-      this.logger.debug(
-        `User ${userId} not authenticated - session missing or wrong step`
-      );
-      return false;
+      return {
+        authenticated: false,
+      };
     }
 
-    // Check if token is expired
     if (session.expireAt && new Date() > new Date(session.expireAt)) {
-      this.logger.debug(`User ${userId} token expired`);
       await this.resetSession(userId);
-      return false;
+      return {
+        authenticated: false,
+      };
     }
 
-    this.logger.debug(`User ${userId} is authenticated`);
-    return true;
+    return {
+      authenticated: true,
+      session,
+    };
   }
 
   /**
@@ -85,7 +87,6 @@ export class SessionManager {
     if (session && session.accessToken) {
       this.logger.log(`Enabling notifications for user ${userId}`);
 
-      // Initialize Pusher client for the user
       this.notificationService.initializePusher(
         userId,
         session.accessToken,
@@ -93,7 +94,6 @@ export class SessionManager {
         sendMessage
       );
 
-      // Update session
       await this.updateSession(userId, {
         organizationId,
         notificationsEnabled: true,
@@ -128,9 +128,7 @@ export class SessionManager {
     for (const [userId, session] of allSessions.entries()) {
       const lastActivity = new Date(session.lastActivity).getTime();
 
-      // Remove sessions that have been inactive for the timeout period
       if (now - lastActivity > this.SESSION_TIMEOUT) {
-        this.logger.debug(`Cleaning up expired session for user ${userId}`);
         await this.resetSession(userId);
         expiredCount++;
       }
@@ -145,12 +143,10 @@ export class SessionManager {
    * Start session cleanup interval
    */
   startCleanupInterval() {
-    // Clear any existing interval
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
     }
 
-    // Check every 5 minutes
     this.cleanupInterval = setInterval(
       () => this.cleanupSessions(),
       15 * 60 * 1000
