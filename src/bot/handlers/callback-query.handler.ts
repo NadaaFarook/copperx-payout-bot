@@ -302,6 +302,20 @@ export class CallbackQueryHandler {
         description: "Handle country selection",
       },
 
+      // Bank account selection callback
+      {
+        pattern: /^bankaccount_(.+)$/,
+        requiresAuth: true,
+        handler: async (ctx, match) => {
+          const accountId = match?.input || "";
+          await this.bankWithdrawHandler.handleBankAccountCallback(
+            ctx,
+            accountId
+          );
+        },
+        description: "Handle bank account selection",
+      },
+
       // Notification toggle callbacks
       {
         pattern: /^notifications_(.+)$/,

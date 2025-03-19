@@ -1,11 +1,10 @@
-import { IsNotEmpty, IsString, Length } from "class-validator";
-import { Country } from "./quote.enum";
+import { IsBoolean, IsNotEmpty, IsString, Length } from "class-validator";
 import { Currency } from "src/transfer/transfer.enum";
 
 export class PublicOfframpQuoteRequestDto {
   @IsString()
   @IsNotEmpty()
-  sourceCountry: Country;
+  sourceCountry: string;
 
   @IsString()
   @IsNotEmpty()
@@ -19,4 +18,7 @@ export class PublicOfframpQuoteRequestDto {
   @IsString()
   @IsNotEmpty()
   currency: Currency;
+
+  @IsString()
+  preferredBankAccountId?: string;
 }

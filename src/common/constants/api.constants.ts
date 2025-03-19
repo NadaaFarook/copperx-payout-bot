@@ -28,7 +28,10 @@ export const API_CONSTANTS = {
     TEST: "/api/notifications/test",
   },
   QUOTES: {
-    PUBLIC_OFFRAMP: "/api/quotes/public-offramp",
+    OFFRAMP: "/api/quotes/offramp",
+  },
+  ACCOUNTS: {
+    GET_ACCOUNTS: "/api/accounts",
   },
 };
 

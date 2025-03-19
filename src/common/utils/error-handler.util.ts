@@ -9,8 +9,6 @@ export class ErrorHandler {
     const message =
       (error.response?.data as any).message || "An unexpected error occurred";
 
-    // console.log(error.response?.data, message, "error.response?.data");
-
     this.logger.error(`API Error: ${status} - ${message}`);
 
     throw new HttpException(message, status);

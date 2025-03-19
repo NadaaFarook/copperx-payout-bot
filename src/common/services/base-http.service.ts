@@ -58,7 +58,6 @@ export abstract class BaseHttpService {
       this.httpService.post<T>(url, data, config)
     );
 
-    console.log(response.data);
     return response.data;
   }
 

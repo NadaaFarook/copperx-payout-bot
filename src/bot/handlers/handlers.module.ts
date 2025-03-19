@@ -12,6 +12,7 @@ import { WalletModule } from "../../wallet/wallet.module";
 import { TransferModule } from "../../transfer/transfer.module";
 import { QuoteModule } from "../../quote/quote.module";
 import { SessionModule } from "../../session/session.module";
+import { AccountModule } from "src/account/account.module";
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { SessionModule } from "../../session/session.module";
     TransferModule,
     QuoteModule,
     SessionModule,
+    AccountModule,
   ],
   providers: [
     BasicCommandHandler,

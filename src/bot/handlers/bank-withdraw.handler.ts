@@ -2,6 +2,7 @@ import { Context, Markup } from "telegraf";
 import { Injectable, Logger } from "@nestjs/common";
 import { TransferService } from "../../transfer/transfer.service";
 import { QuoteService } from "../../quote/quote.service";
+import { AccountService } from "../../account/account.service";
 import {
   CreateOfframpTransferDto,
   TransferSessionData,
@@ -13,7 +14,6 @@ import {
   TransferStep,
 } from "../../transfer/transfer.enum";
 import { PublicOfframpQuoteRequestDto } from "src/quote/quote.dto";
-import { Country } from "src/quote/quote.enum";
 import { formatStatus } from "src/common/utils/ui-formatter.util";
 import { SessionManager } from "../session-manager";
 
@@ -24,6 +24,7 @@ export class BankWithdrawHandler {
   constructor(
     private readonly transferService: TransferService,
     private readonly quoteService: QuoteService,
+    private readonly accountService: AccountService,
     private readonly sessionManager: SessionManager
   ) {}
 
@@ -43,7 +44,7 @@ export class BankWithdrawHandler {
     await ctx.reply(
       "💸 *Bank Withdrawal*\n\n" +
         "Please enter the amount you want to withdraw (in USD):\n\n" +
-        "Example: 10.50",
+        "Example: 50.50",
       {
         parse_mode: "Markdown",
         ...Markup.inlineKeyboard([
@@ -67,9 +68,10 @@ export class BankWithdrawHandler {
     const amountPattern = /^\d+(\.\d{1,2})?$/;
     if (!amountPattern.test(amountText)) {
       await ctx.reply(
-        "⚠️ Invalid amount format. Please enter a valid amount (e.g., 10.50):",
+        "⚠️ Invalid amount format. Please enter a valid amount (e.g., 50.50):",
         Markup.inlineKeyboard([
-          [Markup.button.callback("Cancel", "cancel_transfer")],
+          [Markup.button.callback("Try Again", "cmd_bankwithdraw")],
+          [Markup.button.callback("Main Menu", "cmd_menu")],
         ])
       );
       return true;
@@ -77,6 +79,16 @@ export class BankWithdrawHandler {
 
     const amount = parseFloat(amountText);
     const amountInSmallestUnit = Math.round(amount * 100000000).toString();
+
+    if (amount < 50) {
+      await ctx.reply(
+        "⚠️ Minimum withdrawal amount is 50 USD. Please enter a higher amount:",
+        Markup.inlineKeyboard([
+          [Markup.button.callback("Cancel", "cancel_transfer")],
+        ])
+      );
+      return true;
+    }
 
     // Update session with amount
     transferSession.amount = amountInSmallestUnit;
@@ -141,12 +153,15 @@ export class BankWithdrawHandler {
       }
 
       const actualCountryCode = countryCode.replace("country_", "");
+      transferSession.destinationCountry = actualCountryCode;
+      transferSession.step = TransferStep.BANK_WITHDRAW_SELECT_ACCOUNT;
+      await this.sessionManager.updateSession(userId, { transferSession });
 
-      await this.processBankWithdrawCountry(
+      // Check for bank accounts and display them
+      await this.handleBankAccountSelection(
         ctx,
-        actualCountryCode,
-        transferSession,
-        session.accessToken
+        session.accessToken,
+        actualCountryCode
       );
     } catch (error) {
       this.logger.error(`Error handling country selection: ${error.message}`);
@@ -155,32 +170,182 @@ export class BankWithdrawHandler {
   }
 
   /**
-   * Process bank withdraw country
+   * Handle bank account selection - now with country filtering
    */
-  private async processBankWithdrawCountry(
+  private async handleBankAccountSelection(
     ctx: Context,
-    countryCode: string,
-    transferSession: TransferSessionData,
-    accessToken: string
+    accessToken: string,
+    countryCode: string
   ) {
     const userId = ctx.from?.id;
     if (!userId) return;
 
-    const sourceCountry: Country = Country.NONE;
-
     try {
-      transferSession.destinationCountry = countryCode;
+      await ctx.reply("🏦 Fetching your bank accounts...");
+
+      const allBankAccounts =
+        await this.accountService.getBankAccounts(accessToken);
+
+      // Filter bank accounts by country
+      const bankAccounts = allBankAccounts.filter(
+        (account) =>
+          account.country &&
+          account.country.toLowerCase() === countryCode.toLowerCase()
+      );
+
+      if (!bankAccounts || bankAccounts.length === 0) {
+        await ctx.reply(
+          `❌ You don't have any bank accounts configured for the selected country (${countryCode}). Please add a bank account on the Copperx platform first, or select a different country.`,
+          Markup.inlineKeyboard([
+            [
+              Markup.button.url(
+                "Go to Copperx Platform",
+                "https://payout.copperx.io"
+              ),
+            ],
+            [
+              Markup.button.callback(
+                "Choose Another Country",
+                "cmd_bankwithdraw"
+              ),
+            ],
+          ])
+        );
+        return;
+      }
+
+      // Create buttons for bank account selection
+      const accountButtons = bankAccounts.map((account) => {
+        const bankName = account.bankAccount?.bankName || "Bank Account";
+        const accountNumber = account.bankAccount?.accountNumber
+          ? `(${account.bankAccount.accountNumber.slice(-4)})`
+          : "";
+        const buttonText = `${bankName} ${accountNumber}`;
+
+        return [
+          Markup.button.callback(buttonText, `bankaccount_${account.id}`),
+        ];
+      });
+
+      accountButtons.push([
+        Markup.button.callback("Choose Another Country", "cmd_bankwithdraw"),
+        Markup.button.callback("Cancel", "cancel_transfer"),
+      ]);
+
+      await ctx.reply(
+        `🏦 *Select a Bank Account for Withdrawal to ${countryCode}*\n\n` +
+          "Please choose the bank account you want to withdraw to:",
+        {
+          parse_mode: "Markdown",
+          ...Markup.inlineKeyboard(accountButtons),
+        }
+      );
+    } catch (error) {
+      this.logger.error(`Error fetching bank accounts: ${error.message}`);
+      await ctx.reply(
+        "❌ An error occurred while fetching your bank accounts. Please try again later.",
+        Markup.inlineKeyboard([
+          [Markup.button.callback("Try Again", "cmd_bankwithdraw")],
+          [Markup.button.callback("Main Menu", "cmd_menu")],
+        ])
+      );
+    }
+  }
+
+  /**
+   * Handle bank account selection callback
+   */
+  async handleBankAccountCallback(ctx: Context, callbackData: string) {
+    try {
+      await ctx.answerCbQuery();
+
+      const userId = ctx.from?.id;
+      if (!userId) return;
+
+      const session = await this.sessionManager.getSession(userId);
+
+      if (!session || !session.transferSession || !session.accessToken) {
+        await ctx.reply("Session error. Please try again.");
+        return;
+      }
+
+      const transferSession = session.transferSession as TransferSessionData;
+      const bankAccountId = callbackData.replace("bankaccount_", "");
+
+      // Store the selected bank account ID
+      transferSession.preferredBankAccountId = bankAccountId;
       await this.sessionManager.updateSession(userId, { transferSession });
 
       await ctx.reply("🔄 Requesting quote for your bank withdrawal...");
 
+      // Get all bank accounts to display info about the selected one
+      const bankAccounts = await this.accountService.getBankAccounts(
+        session.accessToken
+      );
+      const selectedAccount = bankAccounts.find(
+        (acc) => acc.id === bankAccountId
+      );
+
+      if (!selectedAccount) {
+        await ctx.reply(
+          "❌ Selected bank account not found. Please try again.",
+          Markup.inlineKeyboard([
+            [Markup.button.callback("Try Again", "cmd_bankwithdraw")],
+            [Markup.button.callback("Main Menu", "cmd_menu")],
+          ])
+        );
+        return;
+      }
+
+      // Verify that the bank account's country matches the destination country
+      if (
+        selectedAccount.country &&
+        selectedAccount.country.toLowerCase() !==
+          transferSession.destinationCountry?.toLowerCase()
+      ) {
+        await ctx.reply(
+          `❌ The selected bank account does not match the destination country (${transferSession.destinationCountry}).\n\nPlease select a bank account that matches the destination country.`,
+          Markup.inlineKeyboard([
+            [Markup.button.callback("Try Again", "cmd_bankwithdraw")],
+            [Markup.button.callback("Main Menu", "cmd_menu")],
+          ])
+        );
+        return;
+      }
+
+      await this.requestQuoteWithBankAccount(
+        ctx,
+        transferSession,
+        session.accessToken
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error handling bank account selection: ${error.message}`
+      );
+      await ctx.reply("An error occurred. Please try again.");
+    }
+  }
+
+  /**
+   * Request quote with bank account
+   */
+  private async requestQuoteWithBankAccount(
+    ctx: Context,
+    transferSession: TransferSessionData,
+    accessToken: string
+  ) {
+    try {
       const quoteRequest: PublicOfframpQuoteRequestDto = {
-        sourceCountry,
-        destinationCountry: countryCode,
+        sourceCountry: "none",
+        destinationCountry: transferSession.destinationCountry!.toLowerCase(),
         amount: transferSession.amount!,
         currency: transferSession.currency!,
+        preferredBankAccountId: transferSession.preferredBankAccountId,
       };
 
+      this.logger.log(
+        `Requesting quote with bank account: ${JSON.stringify(quoteRequest)}`
+      );
       const quoteResponse = await this.quoteService.getPublicOfframpQuote(
         accessToken,
         quoteRequest
@@ -189,14 +354,14 @@ export class BankWithdrawHandler {
       if (quoteResponse.error) {
         await ctx.reply(
           `⚠️ Quote Error: ${quoteResponse.error}\n\n` +
-            "Please try a different amount or destination country.",
+            "Please try a different amount, destination country, or bank account.",
           Markup.inlineKeyboard([
             [Markup.button.callback("Try Again", "cmd_bankwithdraw")],
             [Markup.button.callback("Main Menu", "cmd_menu")],
           ])
         );
 
-        await this.sessionManager.updateSession(userId, {
+        await this.sessionManager.updateSession(ctx.from!.id, {
           transferSession: null,
         });
         return;
@@ -205,7 +370,9 @@ export class BankWithdrawHandler {
       transferSession.quotePayload = quoteResponse.quotePayload;
       transferSession.quoteSignature = quoteResponse.quoteSignature;
       transferSession.step = TransferStep.BANK_WITHDRAW_PURPOSE;
-      await this.sessionManager.updateSession(userId, { transferSession });
+      await this.sessionManager.updateSession(ctx.from!.id, {
+        transferSession,
+      });
 
       const quotePayload = JSON.parse(quoteResponse.quotePayload);
 
@@ -250,6 +417,41 @@ export class BankWithdrawHandler {
       this.logger.error(`Error getting offramp quote: ${error.message}`);
       await ctx.reply(
         "❌ An error occurred while getting a quote for your withdrawal. Please try again later.",
+        Markup.inlineKeyboard([
+          [Markup.button.callback("Try Again", "cmd_bankwithdraw")],
+          [Markup.button.callback("Main Menu", "cmd_menu")],
+        ])
+      );
+
+      await this.sessionManager.updateSession(ctx.from!.id, {
+        transferSession: null,
+      });
+    }
+  }
+
+  /**
+   * Process bank withdraw country
+   */
+  private async processBankWithdrawCountry(
+    ctx: Context,
+    countryCode: string,
+    transferSession: TransferSessionData,
+    accessToken: string
+  ) {
+    const userId = ctx.from?.id;
+    if (!userId) return;
+
+    try {
+      transferSession.destinationCountry = countryCode;
+      transferSession.step = TransferStep.BANK_WITHDRAW_SELECT_ACCOUNT;
+      await this.sessionManager.updateSession(userId, { transferSession });
+
+      // Redirect to bank account selection - pass country code
+      await this.handleBankAccountSelection(ctx, accessToken, countryCode);
+    } catch (error) {
+      this.logger.error(`Error processing country: ${error.message}`);
+      await ctx.reply(
+        "❌ An error occurred while processing your request. Please try again later.",
         Markup.inlineKeyboard([
           [Markup.button.callback("Try Again", "cmd_bankwithdraw")],
           [Markup.button.callback("Main Menu", "cmd_menu")],
@@ -308,10 +510,39 @@ export class BankWithdrawHandler {
       const amountValue = parseInt(transferSession.amount!, 10);
       const formattedAmount = (amountValue / 100000000).toFixed(2);
 
+      // Get bank account info if possible
+      let bankAccountInfo = "";
+      if (transferSession.preferredBankAccountId && session.accessToken) {
+        try {
+          const bankAccounts = await this.accountService.getBankAccounts(
+            session.accessToken
+          );
+          const selectedAccount = bankAccounts.find(
+            (acc) => acc.id === transferSession.preferredBankAccountId
+          );
+
+          if (selectedAccount && selectedAccount.bankAccount) {
+            const bankAcc = selectedAccount.bankAccount;
+            bankAccountInfo = `\n🏦 *Bank:* ${bankAcc.bankName || "N/A"}\n`;
+
+            if (bankAcc.accountNumber) {
+              // Only show last 4 digits for security
+              const maskedNumber = "XXXX" + bankAcc.accountNumber.slice(-4);
+              bankAccountInfo += `📝 *Account:* ${maskedNumber}\n`;
+            }
+          }
+        } catch (error) {
+          this.logger.error(
+            `Error fetching bank account details: ${error.message}`
+          );
+        }
+      }
+
       let confirmationMessage =
         "📋 *Please confirm the bank withdrawal details:*\n\n";
       confirmationMessage += `💰 *Amount:* ${formattedAmount} USDC\n`;
-      confirmationMessage += `🏦 *Destination Country:* ${transferSession.destinationCountry}\n`;
+      confirmationMessage += `🌍 *Destination Country:* ${transferSession.destinationCountry}\n`;
+      confirmationMessage += bankAccountInfo;
       confirmationMessage += `🔍 *Purpose:* ${purposeCode}\n\n`;
 
       await ctx.reply(confirmationMessage, {
@@ -359,6 +590,7 @@ export class BankWithdrawHandler {
         quoteSignature: transferSession.quoteSignature!,
         recipientRelationship: "self",
         note: "Telegram bot bank withdrawal",
+        // preferredBankAccountId: transferSession.preferredBankAccountId,
       };
 
       const result = await this.transferService.withdrawToBank(
@@ -370,10 +602,41 @@ export class BankWithdrawHandler {
         const amountValue = parseInt(transferSession.amount!, 10);
         const formattedAmount = (amountValue / 100000000).toFixed(2);
 
+        // Get bank account info if possible
+        let bankAccountInfo = "";
+        if (transferSession.preferredBankAccountId) {
+          try {
+            const bankAccounts = await this.accountService.getBankAccounts(
+              session.accessToken
+            );
+            const selectedAccount = bankAccounts.find(
+              (acc) => acc.id === transferSession.preferredBankAccountId
+            );
+
+            if (selectedAccount && selectedAccount.bankAccount) {
+              const bankAcc = selectedAccount.bankAccount;
+              if (bankAcc.bankName) {
+                bankAccountInfo = `*Bank:* ${bankAcc.bankName}\n`;
+              }
+
+              if (bankAcc.accountNumber) {
+                // Only show last 4 digits for security
+                const maskedNumber = "XXXX" + bankAcc.accountNumber.slice(-4);
+                bankAccountInfo += `*Account:* ${maskedNumber}\n`;
+              }
+            }
+          } catch (error) {
+            this.logger.error(
+              `Error fetching bank account details: ${error.message}`
+            );
+          }
+        }
+
         await ctx.reply(
           "✅ *Bank withdrawal submitted successfully!*\n\n" +
             `*Amount:* ${formattedAmount} USDC\n` +
             `*Destination Country:* ${transferSession.destinationCountry}\n` +
+            (bankAccountInfo ? bankAccountInfo : "") +
             `*Status:* ${formatStatus(result.status)}\n` +
             `*Transaction ID:* \`${result.id}\``,
           {
@@ -398,7 +661,7 @@ export class BankWithdrawHandler {
     } catch (error) {
       this.logger.error(`Error processing bank withdrawal: ${error.message}`);
       await ctx.reply(
-        "❌ An error occurred while processing your bank withdrawal. Please try again later.",
+        `❌ ${error.message}`,
         Markup.inlineKeyboard([
           [Markup.button.callback("Try Again", "cmd_bankwithdraw")],
           [Markup.button.callback("Main Menu", "cmd_menu")],
@@ -444,6 +707,16 @@ export class BankWithdrawHandler {
             countryCode,
             transferSession,
             accessToken
+          );
+          return true;
+
+        case TransferStep.BANK_WITHDRAW_SELECT_ACCOUNT:
+          await ctx.reply(
+            "⚠️ Please select a bank account using the buttons provided.\n\nIf you don't see your bank account, please add one on the Copperx platform.",
+            Markup.inlineKeyboard([
+              [Markup.button.callback("Try Again", "cmd_bankwithdraw")],
+              [Markup.button.callback("Cancel", "cancel_transfer")],
+            ])
           );
           return true;
 

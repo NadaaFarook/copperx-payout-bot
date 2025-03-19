@@ -6,6 +6,7 @@ import { BankWithdrawHandler } from "../bot/handlers/bank-withdraw.handler";
 import { TokenInterceptor } from "../common/interceptors/token.interceptor";
 import { QuoteModule } from "src/quote/quote.module";
 import { SessionModule } from "../session/session.module";
+import { AccountModule } from "../account/account.module";
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { SessionModule } from "../session/session.module";
     }),
     QuoteModule,
     SessionModule,
+    AccountModule,
   ],
   providers: [
     TransferService,

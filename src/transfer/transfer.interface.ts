@@ -17,6 +17,7 @@ export interface TransferSessionData {
   quotePayload?: string;
   quoteSignature?: string;
   destinationCountry?: string;
+  preferredBankAccountId?: string;
 }
 
 export interface CustomerDto {

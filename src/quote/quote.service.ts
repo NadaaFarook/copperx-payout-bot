@@ -31,7 +31,7 @@ export class QuoteService extends BaseHttpService {
     this.logger.log(`Requesting offramp quote for amount ${dto.amount}`);
 
     return this.post<OfframpQuoteResponseDto>(
-      API_CONSTANTS.QUOTES.PUBLIC_OFFRAMP,
+      API_CONSTANTS.QUOTES.OFFRAMP,
       dto,
       token
     );

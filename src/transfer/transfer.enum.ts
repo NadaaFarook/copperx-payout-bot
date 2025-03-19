@@ -97,6 +97,7 @@ export enum TransferStep {
   WITHDRAW_CONFIRMATION = "withdraw_confirmation",
   BANK_WITHDRAW_AMOUNT = "bank_withdraw_amount",
   BANK_WITHDRAW_COUNTRY = "bank_withdraw_country",
+  BANK_WITHDRAW_SELECT_ACCOUNT = "bank_withdraw_select_account",
   BANK_WITHDRAW_PURPOSE = "bank_withdraw_purpose",
   BANK_WITHDRAW_CONFIRMATION = "bank_withdraw_confirmation",
   BANK_WITHDRAW_QUOTE = "bank_withdraw_quote",
