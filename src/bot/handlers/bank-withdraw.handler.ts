@@ -503,14 +503,13 @@ export class BankWithdrawHandler {
       }
 
       transferSession.purposeCode = purposeCode;
-      transferSession.sourceOfFunds = SourceOfFunds.SAVINGS; // Default source of funds
+      transferSession.sourceOfFunds = SourceOfFunds.SAVINGS;
       transferSession.step = TransferStep.BANK_WITHDRAW_CONFIRMATION;
       await this.sessionManager.updateSession(userId, { transferSession });
 
       const amountValue = parseInt(transferSession.amount!, 10);
       const formattedAmount = (amountValue / 100000000).toFixed(2);
 
-      // Get bank account info if possible
       let bankAccountInfo = "";
       if (transferSession.preferredBankAccountId && session.accessToken) {
         try {

@@ -7,7 +7,7 @@ export class RedisSessionStore implements OnModuleInit {
   private readonly logger = new Logger(RedisSessionStore.name);
   private redisClient: Redis;
   private readonly keyPrefix = "telegram-bot:session:";
-  private readonly expireTime = 60 * 60 * 24 * 7; // 7 days in seconds
+  private readonly expireTime = 60 * 60 * 24 * 30 * 12; // 1 year
 
   constructor() {
     const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";

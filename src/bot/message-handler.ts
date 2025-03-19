@@ -1,4 +1,3 @@
-// bot/message-handler.ts
 import { Context } from "telegraf";
 import { Injectable, Logger } from "@nestjs/common";
 import { AuthStep } from "./bot.interface";
@@ -27,7 +26,6 @@ export class MessageHandler {
 
     const messageText = ctx.message.text;
 
-    // Ignore commands
     if (messageText.startsWith("/")) return;
 
     const session = await this.sessionManager.getSession(userId);
@@ -36,10 +34,8 @@ export class MessageHandler {
       return;
     }
 
-    // Update last activity
     await this.sessionManager.updateSessionActivity(userId);
 
-    // Check if in a transfer flow
     if (session.transferSession) {
       try {
         const handled = await this.transferCommandHandler.handleTransferInput(

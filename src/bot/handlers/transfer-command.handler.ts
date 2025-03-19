@@ -756,7 +756,6 @@ export class TransferCommandHandler {
       );
 
       if (result) {
-        // Format amount for display
         const amountValue = parseInt(transferSession.amount!, 10);
         const formattedAmount = (amountValue / 100000000).toFixed(2);
 
