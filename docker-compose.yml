@@ -1,0 +1,36 @@
+version: "3.8"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - API_BASE_URL=${API_BASE_URL}
+      - PUSHER_KEY=${PUSHER_KEY}
+      - PUSHER_CLUSTER=${PUSHER_CLUSTER}
+      - REDIS_URL=redis://redis:6379
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./:/app
+      - /app/node_modules
+    depends_on:
+      - redis
+    restart: unless-stopped
+    command: npm run start:dev
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: always
+    command: redis-server --appendonly yes
+
+volumes:
+  redis-data:
