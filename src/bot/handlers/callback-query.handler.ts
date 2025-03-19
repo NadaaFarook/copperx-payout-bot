@@ -1,4 +1,4 @@
-import { Logger } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { Context, Markup, Telegraf } from "telegraf";
 import { AuthCommandHandler } from "./auth-command.handler";
 import { BankWithdrawHandler } from "./bank-withdraw.handler";
@@ -22,6 +22,7 @@ interface CallbackDefinition {
   description: string;
 }
 
+@Injectable()
 export class CallbackQueryHandler {
   private readonly logger = new Logger(CallbackQueryHandler.name);
 
@@ -31,44 +32,21 @@ export class CallbackQueryHandler {
     private readonly kycCommandHandler: KycCommandHandler,
     private readonly walletCommandHandler: WalletCommandHandler,
     private readonly transferCommandHandler: TransferCommandHandler,
-    private readonly bankWithdrawHandler: BankWithdrawHandler
+    private readonly bankWithdrawHandler: BankWithdrawHandler,
+    private readonly sessionManager: SessionManager
   ) {}
 
   /**
    * Register all callback handlers
    */
-  registerCallbacks(bot: Telegraf, sessionManager: SessionManager) {
-    const getSession = async (userId: number) => {
-      return await sessionManager.getSession(userId);
-    };
-
-    const isAuthenticated = async (userId: number) => {
-      return await sessionManager.isAuthenticated(userId);
-    };
-
-    const updateSession = async (userId: number, data: any) => {
-      await sessionManager.updateSession(userId, data);
-    };
-
-    const enableNotifications = async (
-      userId: number,
-      orgId: string,
-      sendMessage: (message: string) => Promise<void>
-    ) => {
-      await sessionManager.enableNotifications(userId, orgId, sendMessage);
-    };
-
-    const disableNotifications = async (userId: number) => {
-      await sessionManager.disableNotifications(userId);
-    };
-
+  registerCallbacks(bot: Telegraf) {
     const callbacks: CallbackDefinition[] = [
       // Basic commands
       {
         pattern: "cmd_menu",
         requiresAuth: false,
         handler: async (ctx) =>
-          await this.basicCommandHandler.showMainMenu(ctx, isAuthenticated),
+          await this.basicCommandHandler.showMainMenu(ctx),
         description: "Show main menu",
       },
       {
@@ -84,11 +62,7 @@ export class CallbackQueryHandler {
         pattern: "cmd_login",
         requiresAuth: false,
         handler: async (ctx) =>
-          await this.authCommandHandler.handleLoginCommand(
-            ctx,
-            updateSession,
-            isAuthenticated
-          ),
+          await this.authCommandHandler.handleLoginCommand(ctx),
         description: "Start login process",
       },
       {
@@ -105,10 +79,7 @@ export class CallbackQueryHandler {
         pattern: "logout_confirm",
         requiresAuth: false,
         handler: async (ctx) =>
-          await this.authCommandHandler.handleLogoutConfirmCallback(
-            ctx,
-            sessionManager.resetSession.bind(sessionManager)
-          ),
+          await this.authCommandHandler.handleLogoutConfirmCallback(ctx),
         description: "Confirm logout",
       },
       {
@@ -197,10 +168,7 @@ export class CallbackQueryHandler {
         handler: async (ctx, _, session) => {
           const authCtx = ctx as AuthenticatedContext;
           authCtx.session = session!;
-          await this.bankWithdrawHandler.handleBankWithdrawCommand(
-            authCtx,
-            updateSession
-          );
+          await this.bankWithdrawHandler.handleBankWithdrawCommand(authCtx);
         },
         description: "Start bank withdrawal process",
       },
@@ -220,12 +188,7 @@ export class CallbackQueryHandler {
         handler: async (ctx, _, session) => {
           const authCtx = ctx as AuthenticatedContext;
           authCtx.session = session!;
-          await this.basicCommandHandler.handleNotificationsCommand(
-            ctx,
-            isAuthenticated,
-            enableNotifications,
-            disableNotifications
-          );
+          await this.basicCommandHandler.handleNotificationsCommand(ctx);
         },
         description: "Manage notifications",
       },
@@ -259,7 +222,7 @@ export class CallbackQueryHandler {
           ].includes(category);
 
           if (needsAuth) {
-            const authCtx = await handleAuthCheck(ctx, sessionManager);
+            const authCtx = await handleAuthCheck(ctx, this.sessionManager);
             if (!authCtx) return;
             await this.basicCommandHandler.handleMenuCategoryCallback(
               authCtx,
@@ -283,9 +246,7 @@ export class CallbackQueryHandler {
           const method = match?.input || "";
           await this.transferCommandHandler.handleSendMethodCallback(
             ctx,
-            method,
-            isAuthenticated,
-            updateSession
+            method
           );
         },
         description: "Handle send method selection",
@@ -299,9 +260,7 @@ export class CallbackQueryHandler {
           const method = match?.input || "";
           await this.transferCommandHandler.handleWithdrawMethodCallback(
             ctx,
-            method,
-            isAuthenticated,
-            updateSession
+            method
           );
         },
         description: "Handle withdraw method selection",
@@ -313,12 +272,7 @@ export class CallbackQueryHandler {
         requiresAuth: true,
         handler: async (ctx, match) => {
           const purpose = match?.input || "";
-          await this.transferCommandHandler.handlePurposeCallback(
-            ctx,
-            purpose,
-            getSession,
-            updateSession
-          );
+          await this.transferCommandHandler.handlePurposeCallback(ctx, purpose);
         },
         description: "Handle purpose selection",
       },
@@ -331,9 +285,7 @@ export class CallbackQueryHandler {
           const purpose = match?.input || "";
           await this.bankWithdrawHandler.handleBankPurposeCallback(
             ctx,
-            purpose,
-            getSession,
-            updateSession
+            purpose
           );
         },
         description: "Handle bank withdrawal purpose selection",
@@ -345,12 +297,7 @@ export class CallbackQueryHandler {
         requiresAuth: true,
         handler: async (ctx, match) => {
           const country = match?.input || "";
-          await this.bankWithdrawHandler.handleCountryCallback(
-            ctx,
-            country,
-            getSession,
-            updateSession
-          );
+          await this.bankWithdrawHandler.handleCountryCallback(ctx, country);
         },
         description: "Handle country selection",
       },
@@ -363,10 +310,7 @@ export class CallbackQueryHandler {
           const action = match?.input || "";
           await this.basicCommandHandler.handleNotificationCallback(
             ctx,
-            action,
-            getSession,
-            enableNotifications,
-            disableNotifications
+            action
           );
         },
         description: "Handle notification toggle",
@@ -377,11 +321,7 @@ export class CallbackQueryHandler {
         pattern: "confirm_transfer",
         requiresAuth: true,
         handler: async (ctx) => {
-          await this.transferCommandHandler.handleConfirmTransferCallback(
-            ctx,
-            getSession,
-            updateSession
-          );
+          await this.transferCommandHandler.handleConfirmTransferCallback(ctx);
         },
         description: "Confirm transfer",
       },
@@ -391,11 +331,7 @@ export class CallbackQueryHandler {
         pattern: "confirm_bankwithdraw",
         requiresAuth: true,
         handler: async (ctx) => {
-          await this.bankWithdrawHandler.handleBankWithdrawConfirmCallback(
-            ctx,
-            getSession,
-            updateSession
-          );
+          await this.bankWithdrawHandler.handleBankWithdrawConfirmCallback(ctx);
         },
         description: "Confirm bank withdrawal",
       },
@@ -405,10 +341,7 @@ export class CallbackQueryHandler {
         pattern: "cancel_transfer",
         requiresAuth: false,
         handler: async (ctx) => {
-          await this.transferCommandHandler.handleCancelTransferCallback(
-            ctx,
-            updateSession
-          );
+          await this.transferCommandHandler.handleCancelTransferCallback(ctx);
         },
         description: "Cancel transfer",
       },
@@ -420,7 +353,7 @@ export class CallbackQueryHandler {
           await ctx.answerCbQuery();
 
           if (callbackDef.requiresAuth) {
-            const authCtx = await handleAuthCheck(ctx, sessionManager);
+            const authCtx = await handleAuthCheck(ctx, this.sessionManager);
             if (!authCtx) return;
 
             await callbackDef.handler(ctx, ctx.match, authCtx.session);

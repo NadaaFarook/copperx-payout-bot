@@ -81,7 +81,7 @@ export class SessionManager {
     userId: number,
     organizationId: string,
     sendMessage: (message: string) => Promise<void>
-  ): Promise<void> {
+  ) {
     const session = await this.getSession(userId);
 
     if (session && session.accessToken) {
@@ -108,7 +108,7 @@ export class SessionManager {
   /**
    * Disable notifications for a user
    */
-  async disableNotifications(userId: number): Promise<void> {
+  async disableNotifications(userId: number) {
     const session = await this.getSession(userId);
 
     if (session && session.notificationsEnabled) {

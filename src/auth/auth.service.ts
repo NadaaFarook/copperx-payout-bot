@@ -3,11 +3,12 @@ import { Injectable, Logger } from "@nestjs/common";
 import { API_CONSTANTS } from "../common/constants/api.constants";
 import { TokenInterceptor } from "../common/interceptors/token.interceptor";
 import { BaseHttpService } from "../common/services/base-http.service";
-import { LoginEmailOtpRequestDto } from "./dto/login-email-otp-request.dto";
-import { LoginEmailOtpResponseInterface } from "./interfaces/login-email-otp-response.interface";
-import { VerifyEmailOtpRequestDto } from "./dto/verify-email-otp-request.dto";
-import { AuthenticateResponseInterface } from "./interfaces/authenticate-response.interface";
-import { AuthUserInterface } from "./interfaces/auth.interface";
+import {
+  AuthenticateResponseInterface,
+  AuthUserInterface,
+  LoginEmailOtpResponseInterface,
+} from "./auth.interface";
+import { LoginEmailOtpRequestDto, VerifyEmailOtpRequestDto } from "./auth.dto";
 
 @Injectable()
 export class AuthService extends BaseHttpService {

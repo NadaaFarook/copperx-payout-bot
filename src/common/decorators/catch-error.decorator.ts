@@ -18,6 +18,7 @@ export function CatchHttpError(logger: Logger) {
       try {
         return await originalMethod.apply(this, args);
       } catch (error) {
+        console.log(error);
         logger.error(
           `Error in ${target.constructor.name}.${propertyKey}: ${error.message}`
         );

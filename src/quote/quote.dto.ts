@@ -1,5 +1,6 @@
 import { IsNotEmpty, IsString, Length } from "class-validator";
 import { Country } from "./quote.enum";
+import { Currency } from "src/transfer/transfer.enum";
 
 export class PublicOfframpQuoteRequestDto {
   @IsString()
@@ -14,4 +15,8 @@ export class PublicOfframpQuoteRequestDto {
   @Length(100000000)
   @IsNotEmpty()
   amount: string;
+
+  @IsString()
+  @IsNotEmpty()
+  currency: Currency;
 }

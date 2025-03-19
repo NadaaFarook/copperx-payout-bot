@@ -1,8 +1,9 @@
 import { Markup } from "telegraf";
-import { Logger } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { KycService } from "src/kyc/kyc.service";
 import { AuthenticatedContext } from "src/auth-middleware";
 
+@Injectable()
 export class KycCommandHandler {
   private readonly logger = new Logger(KycCommandHandler.name);
 
@@ -10,7 +11,6 @@ export class KycCommandHandler {
 
   /**
    * Handle KYC status command with enhanced presentation
-   * Now uses session directly from context or callback
    */
   async handleKycStatusCommand(ctx: AuthenticatedContext) {
     try {
@@ -91,6 +91,7 @@ export class KycCommandHandler {
       this.logger.error(`Error fetching KYC status: ${error.message}`);
       await ctx.reply(
         "Failed to fetch your KYC status. Please try again later.",
+
         Markup.inlineKeyboard([
           [Markup.button.callback("Try Again", "cmd_kyc")],
           [Markup.button.callback("Main Menu", "cmd_menu")],

@@ -1,8 +1,4 @@
-import {
-  UserProfileTypeEnum,
-  UserRoleEnum,
-  UserStatusEnum,
-} from "../auth.enum";
+import { UserProfileTypeEnum, UserRoleEnum, UserStatusEnum } from "./auth.enum";
 
 export interface AuthUserInterface {
   id: string;
@@ -19,4 +15,17 @@ export interface AuthUserInterface {
   walletAddress: string;
   walletId: string;
   walletAccountType: string;
+}
+
+export interface AuthenticateResponseInterface {
+  schema: string;
+  accessToken: string;
+  accessTokenId: string;
+  expireAt: string;
+  user: AuthUserInterface;
+}
+
+export interface LoginEmailOtpResponseInterface {
+  email: string;
+  sid: string;
 }

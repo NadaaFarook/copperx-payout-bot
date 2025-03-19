@@ -1,16 +1,22 @@
 import { Markup } from "telegraf";
 import { Context } from "telegraf";
-import { Logger } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
+import { SessionManager } from "../session-manager";
 
+@Injectable()
 export class BasicCommandHandler {
   private readonly logger = new Logger(BasicCommandHandler.name);
+
+  constructor(private readonly sessionManager: SessionManager) {}
 
   /**
    * Handle start command with interactive welcome menu
    */
-  async handleStartCommand(ctx: Context, resetSession: Function) {
+  async handleStartCommand(ctx: Context) {
     const userId = ctx.from?.id;
-    resetSession(userId);
+    if (userId) {
+      await this.sessionManager.resetSession(userId);
+    }
 
     await ctx.reply(
       "Welcome to Copperx Telegram Bot! 👋\n\n" +
@@ -127,21 +133,17 @@ export class BasicCommandHandler {
   /**
    * Handle notifications command with inline options
    */
-  async handleNotificationsCommand(
-    ctx: Context,
-    isAuthenticated: Function,
-    enableNotifications: Function,
-    disableNotifications: Function
-  ) {
+  async handleNotificationsCommand(ctx: Context) {
     const userId = ctx.from?.id;
-    const { authenticated, session } = await isAuthenticated(userId);
-
     if (!userId) {
       await ctx.reply("User ID not found. Please try again.");
       return;
     }
 
-    if (!authenticated) {
+    const { authenticated, session } =
+      await this.sessionManager.isAuthenticated(userId);
+
+    if (!authenticated || !session) {
       await ctx.reply(
         "You need to be logged in to manage notifications. Use /login to authenticate."
       );
@@ -170,7 +172,11 @@ export class BasicCommandHandler {
           }
         };
 
-        enableNotifications(userId, session.organizationId, sendMessage);
+        await this.sessionManager.enableNotifications(
+          userId,
+          session.organizationId,
+          sendMessage
+        );
         await ctx.reply(
           "Notifications have been enabled 🔔\n\nYou will now receive deposit notifications."
         );
@@ -186,7 +192,7 @@ export class BasicCommandHandler {
         return;
       }
 
-      disableNotifications(userId);
+      await this.sessionManager.disableNotifications(userId);
       await ctx.reply(
         "Notifications have been disabled 🔕\n\nYou will no longer receive deposit notifications."
       );
@@ -220,13 +226,7 @@ export class BasicCommandHandler {
   /**
    * Handle notification toggle from inline buttons
    */
-  async handleNotificationCallback(
-    ctx: Context,
-    action: string,
-    getSession: Function,
-    enableNotifications: Function,
-    disableNotifications: Function
-  ) {
+  async handleNotificationCallback(ctx: Context, action: string) {
     try {
       await ctx.answerCbQuery();
 
@@ -236,7 +236,8 @@ export class BasicCommandHandler {
         await ctx.reply("User ID not found. Please try again.");
         return;
       }
-      const session = await getSession(userId);
+
+      const session = await this.sessionManager.getSession(userId);
 
       if (!session) {
         await ctx.reply("Session error. Please /login again.");
@@ -258,7 +259,11 @@ export class BasicCommandHandler {
             }
           };
 
-          enableNotifications(userId, session.organizationId, sendMessage);
+          await this.sessionManager.enableNotifications(
+            userId,
+            session.organizationId,
+            sendMessage
+          );
           await ctx.reply(
             "Notifications have been enabled 🔔\n\nYou will now receive deposit notifications."
           );
@@ -273,33 +278,42 @@ export class BasicCommandHandler {
           return;
         }
 
-        disableNotifications(userId);
+        await this.sessionManager.disableNotifications(userId);
         await ctx.reply(
           "Notifications have been disabled 🔕\n\nYou will no longer receive deposit notifications."
         );
       }
     } catch (error) {
       this.logger.error(
-        `Error handling notification callback: ${error.message}`,
+        `Error handling notification callback: ${error.message}`
+      );
+      await ctx.reply(
+        "An error occurred. Please try again.",
         Markup.inlineKeyboard([
           [Markup.button.callback("Try Again", "cmd_notifications")],
           [Markup.button.callback("Main Menu", "cmd_menu")],
         ])
       );
-      await ctx.reply("An error occurred. Please try again.");
     }
   }
 
   /**
    * Create main menu with all available options
    */
-  async showMainMenu(ctx: Context, isAuthenticated: Function) {
-    const isLoggedIn = isAuthenticated(ctx.from?.id);
+  async showMainMenu(ctx: Context) {
+    const userId = ctx.from?.id;
+
+    if (!userId) {
+      await ctx.reply("User ID not found. Please try again.");
+      return;
+    }
+
+    const { authenticated } = await this.sessionManager.isAuthenticated(userId);
 
     // Different buttons based on login status
     const buttons = [];
 
-    if (isLoggedIn) {
+    if (authenticated) {
       // User is logged in - show full menu
       buttons.push([
         Markup.button.callback("Wallet & Balance 💼", "menu_wallet"),

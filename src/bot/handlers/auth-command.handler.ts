@@ -1,31 +1,35 @@
 import { Context, Markup } from "telegraf";
-import { Logger } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { AuthService } from "src/auth/auth.service";
-import { LoginEmailOtpRequestDto } from "src/auth/dto/login-email-otp-request.dto";
-import { VerifyEmailOtpRequestDto } from "src/auth/dto/verify-email-otp-request.dto";
 import { AuthStep } from "../bot.interface";
 import { AuthenticatedContext } from "src/auth-middleware";
+import {
+  LoginEmailOtpRequestDto,
+  VerifyEmailOtpRequestDto,
+} from "src/auth/auth.dto";
+import { SessionManager } from "../session-manager";
 
+@Injectable()
 export class AuthCommandHandler {
   private readonly logger = new Logger(AuthCommandHandler.name);
 
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly sessionManager: SessionManager
+  ) {}
 
   /**
    * Handle login command
    */
-  async handleLoginCommand(
-    ctx: Context,
-    updateSession: Function,
-    isAuthenticated: Function
-  ) {
+  async handleLoginCommand(ctx: Context) {
     const userId = ctx.from?.id;
+    if (!userId) return;
 
-    const { authenticated } = await isAuthenticated(userId);
+    const { authenticated } = await this.sessionManager.isAuthenticated(userId);
 
     if (authenticated) {
       await ctx.reply(
-        "You are already logged inn.",
+        "You are already logged in.",
         Markup.inlineKeyboard([
           [Markup.button.callback("Logout", "cmd_logout")],
           [Markup.button.callback("Main Menu", "cmd_menu")],
@@ -34,7 +38,7 @@ export class AuthCommandHandler {
       return;
     }
 
-    await updateSession(userId, {
+    await this.sessionManager.updateSession(userId, {
       step: AuthStep.WAITING_FOR_EMAIL,
       lastActivity: new Date(),
     });
@@ -48,7 +52,6 @@ export class AuthCommandHandler {
 
   /**
    * Handle logout command with confirmation
-   * Now works with session directly
    */
   async handleLogoutCommand(ctx: AuthenticatedContext) {
     if (ctx.session && ctx.session.step === AuthStep.AUTHENTICATED) {
@@ -75,14 +78,14 @@ export class AuthCommandHandler {
   /**
    * Handle logout confirmation callback
    */
-  async handleLogoutConfirmCallback(ctx: Context, resetSession: Function) {
+  async handleLogoutConfirmCallback(ctx: Context) {
     try {
       await ctx.answerCbQuery();
 
       const userId = ctx.from?.id;
 
       if (userId) {
-        await resetSession(userId);
+        await this.sessionManager.resetSession(userId);
         await ctx.reply(
           "You have been logged out successfully.",
           Markup.inlineKeyboard([
@@ -102,7 +105,7 @@ export class AuthCommandHandler {
   /**
    * Handle email input with clear validation
    */
-  async handleEmailInput(ctx: Context, email: string, updateSession: Function) {
+  async handleEmailInput(ctx: Context, email: string) {
     const userId = ctx.from?.id;
 
     if (!userId) {
@@ -125,7 +128,7 @@ export class AuthCommandHandler {
       const response = await this.authService.requestEmailOtp(dto);
 
       if (response) {
-        await updateSession(userId, {
+        await this.sessionManager.updateSession(userId, {
           step: AuthStep.WAITING_FOR_OTP,
           email,
           sid: response.sid,
@@ -161,13 +164,7 @@ export class AuthCommandHandler {
   /**
    * Handle OTP input with clear validation
    */
-  async handleOtpInput(
-    ctx: Context,
-    otp: string,
-    getSession: Function,
-    updateSession: Function,
-    enableNotifications?: Function
-  ) {
+  async handleOtpInput(ctx: Context, otp: string) {
     const userId = ctx.from?.id;
 
     if (!userId) {
@@ -175,7 +172,7 @@ export class AuthCommandHandler {
       return;
     }
 
-    const session = await getSession(userId);
+    const session = await this.sessionManager.getSession(userId);
 
     if (!session) {
       await ctx.reply(
@@ -208,7 +205,7 @@ export class AuthCommandHandler {
           authResponse.accessToken
         );
 
-        await updateSession(userId, {
+        await this.sessionManager.updateSession(userId, {
           step: AuthStep.AUTHENTICATED,
           accessToken: authResponse.accessToken,
           expireAt: authResponse.expireAt,
@@ -216,7 +213,7 @@ export class AuthCommandHandler {
           lastActivity: new Date(),
         });
 
-        if (enableNotifications && userInfo.organizationId) {
+        if (userInfo.organizationId) {
           const sendMessage = async (message: string) => {
             if (ctx.telegram) {
               await ctx.telegram.sendMessage(userId, message, {
@@ -225,7 +222,11 @@ export class AuthCommandHandler {
             }
           };
 
-          enableNotifications(userId, userInfo.organizationId, sendMessage);
+          await this.sessionManager.enableNotifications(
+            userId,
+            userInfo.organizationId,
+            sendMessage
+          );
         }
 
         await ctx.reply(
@@ -264,7 +265,6 @@ export class AuthCommandHandler {
 
   /**
    * Handle profile command with enhanced formatting
-   * Now works with session directly
    */
   async handleProfileCommand(ctx: AuthenticatedContext) {
     try {

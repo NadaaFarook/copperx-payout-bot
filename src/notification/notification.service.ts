@@ -130,7 +130,7 @@ export class NotificationService extends BaseHttpService {
   private async handleDepositEvent(
     data: PusherNotificationInterface,
     sendMessage: (message: string) => Promise<void>
-  ): Promise<void> {
+  ) {
     try {
       let message =
         `💰 *New Deposit Received*\n\n` +

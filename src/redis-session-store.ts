@@ -42,10 +42,7 @@ export class RedisSessionStore implements OnModuleInit {
   /**
    * Save or update a session
    */
-  async saveSession(
-    userId: number,
-    sessionData: Partial<UserSession>
-  ): Promise<void> {
+  async saveSession(userId: number, sessionData: Partial<UserSession>) {
     try {
       const key = this.getKey(userId);
       const existingSession = await this.getSession(userId);
@@ -70,7 +67,7 @@ export class RedisSessionStore implements OnModuleInit {
   /**
    * Delete a session
    */
-  async deleteSession(userId: number): Promise<void> {
+  async deleteSession(userId: number) {
     try {
       await this.redisClient.del(this.getKey(userId));
     } catch (error) {
@@ -81,7 +78,7 @@ export class RedisSessionStore implements OnModuleInit {
   /**
    * Update session expiry time
    */
-  async touchSession(userId: number): Promise<void> {
+  async touchSession(userId: number) {
     try {
       const key = this.getKey(userId);
       const exists = await this.redisClient.exists(key);

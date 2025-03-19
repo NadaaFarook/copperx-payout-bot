@@ -1,5 +1,5 @@
 import { Context, Markup } from "telegraf";
-import { Logger } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { TransferService } from "../../transfer/transfer.service";
 import {
   CreateSendTransferDto,
@@ -19,25 +19,26 @@ import {
   formatTransferType,
 } from "src/common/utils/ui-formatter.util";
 import { AuthenticatedContext } from "src/auth-middleware";
+import { SessionManager } from "../session-manager";
 
+@Injectable()
 export class TransferCommandHandler {
   private readonly logger = new Logger(TransferCommandHandler.name);
 
   constructor(
     private readonly transferService: TransferService,
-    private readonly bankWithdrawHandler: BankWithdrawHandler
+    private readonly bankWithdrawHandler: BankWithdrawHandler,
+    private readonly sessionManager: SessionManager
   ) {}
 
   /**
    * Handle send command with interactive options
    */
-  async handleSendCommand(
-    ctx: Context,
-    isAuthenticated: Function,
-    updateSession: Function
-  ) {
+  async handleSendCommand(ctx: Context) {
     const userId = ctx.from?.id;
-    const { authenticated } = await isAuthenticated(userId);
+    if (!userId) return;
+
+    const { authenticated } = await this.sessionManager.isAuthenticated(userId);
 
     if (!authenticated) {
       await ctx.reply(
@@ -61,7 +62,7 @@ export class TransferCommandHandler {
 
     if (method === "email") {
       transferSession.step = TransferStep.SEND_EMAIL_RECIPIENT;
-      updateSession(userId, { transferSession });
+      await this.sessionManager.updateSession(userId, { transferSession });
       await ctx.reply(
         "📧 *Send by Email*\n\n" +
           "Please enter the recipient's email address:\n\n" +
@@ -70,7 +71,7 @@ export class TransferCommandHandler {
       );
     } else if (method === "wallet") {
       transferSession.step = TransferStep.SEND_WALLET_RECIPIENT;
-      updateSession(userId, { transferSession });
+      await this.sessionManager.updateSession(userId, { transferSession });
       await ctx.reply(
         "💼 *Send by Wallet Address*\n\n" +
           "Please enter the recipient's wallet address:\n\n" +
@@ -96,17 +97,15 @@ export class TransferCommandHandler {
   /**
    * Handle send method callback
    */
-  async handleSendMethodCallback(
-    ctx: Context,
-    method: string,
-    isAuthenticated: Function,
-    updateSession: Function
-  ) {
+  async handleSendMethodCallback(ctx: Context, method: string) {
     try {
       await ctx.answerCbQuery();
 
       const userId = ctx.from?.id;
-      const { authenticated } = await isAuthenticated(userId);
+      if (!userId) return;
+
+      const { authenticated } =
+        await this.sessionManager.isAuthenticated(userId);
 
       if (!authenticated) {
         await ctx.reply(
@@ -125,7 +124,7 @@ export class TransferCommandHandler {
 
       if (method === "send_email") {
         transferSession.step = TransferStep.SEND_EMAIL_RECIPIENT;
-        updateSession(userId, { transferSession });
+        await this.sessionManager.updateSession(userId, { transferSession });
         await ctx.reply(
           "📧 *Send by Email*\n\n" +
             "Please enter the recipient's email address:\n\n" +
@@ -139,7 +138,7 @@ export class TransferCommandHandler {
         );
       } else if (method === "send_wallet") {
         transferSession.step = TransferStep.SEND_WALLET_RECIPIENT;
-        updateSession(userId, { transferSession });
+        await this.sessionManager.updateSession(userId, { transferSession });
         await ctx.reply(
           "💼 *Send by Wallet Address*\n\n" +
             "Please enter the recipient's wallet address:\n\n" +
@@ -178,17 +177,15 @@ export class TransferCommandHandler {
   /**
    * Handle withdraw method callback
    */
-  async handleWithdrawMethodCallback(
-    ctx: Context,
-    method: string,
-    isAuthenticated: Function,
-    updateSession: Function
-  ) {
+  async handleWithdrawMethodCallback(ctx: Context, method: string) {
     try {
       await ctx.answerCbQuery();
 
       const userId = ctx.from?.id;
-      const { authenticated } = await isAuthenticated(userId);
+      if (!userId) return;
+
+      const { authenticated } =
+        await this.sessionManager.isAuthenticated(userId);
 
       if (!authenticated) {
         await ctx.reply(
@@ -205,7 +202,7 @@ export class TransferCommandHandler {
           step: TransferStep.WITHDRAW_WALLET_ADDRESS,
         };
 
-        updateSession(userId, { transferSession });
+        await this.sessionManager.updateSession(userId, { transferSession });
         await ctx.reply(
           "💼 *Wallet Withdrawal*\n\n" +
             "Please enter the wallet address to withdraw to:\n\n" +
@@ -219,10 +216,7 @@ export class TransferCommandHandler {
         );
       } else if (method === "withdraw_bank") {
         // Delegate to bank withdraw handler
-        await this.bankWithdrawHandler.handleBankWithdrawCommand(
-          ctx,
-          updateSession
-        );
+        await this.bankWithdrawHandler.handleBankWithdrawCommand(ctx);
       }
     } catch (error) {
       this.logger.error(`Error handling withdraw method: ${error.message}`);
@@ -233,13 +227,16 @@ export class TransferCommandHandler {
   /**
    * Handle cancel transfer callback
    */
-  async handleCancelTransferCallback(ctx: Context, updateSession: Function) {
+  async handleCancelTransferCallback(ctx: Context) {
     try {
       await ctx.answerCbQuery();
 
       const userId = ctx.from?.id;
+      if (!userId) return;
 
-      updateSession(userId, { transferSession: null });
+      await this.sessionManager.updateSession(userId, {
+        transferSession: null,
+      });
 
       await ctx.reply(
         "✅ Transaction cancelled.",
@@ -353,10 +350,11 @@ export class TransferCommandHandler {
   private async handleSendEmailRecipientInput(
     ctx: Context,
     email: string,
-    transferSession: TransferSessionData,
-    updateSession: Function
+    transferSession: TransferSessionData
   ): Promise<boolean> {
     const userId = ctx.from?.id;
+    if (!userId) return false;
+
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
     if (!emailRegex.test(email)) {
@@ -371,7 +369,7 @@ export class TransferCommandHandler {
 
     transferSession.recipientEmail = email;
     transferSession.step = TransferStep.SEND_AMOUNT;
-    updateSession(userId, { transferSession });
+    await this.sessionManager.updateSession(userId, { transferSession });
 
     await ctx.reply(
       `📧 Recipient email set to: *${email}*\n\n` +
@@ -392,10 +390,10 @@ export class TransferCommandHandler {
   private async handleSendWalletRecipientInput(
     ctx: Context,
     walletAddress: string,
-    transferSession: TransferSessionData,
-    updateSession: Function
+    transferSession: TransferSessionData
   ): Promise<boolean> {
     const userId = ctx.from?.id;
+    if (!userId) return false;
 
     if (!walletAddress || walletAddress.trim().length < 10) {
       await ctx.reply(
@@ -410,7 +408,7 @@ export class TransferCommandHandler {
     // Update session with wallet address
     transferSession.recipientWalletAddress = walletAddress;
     transferSession.step = TransferStep.SEND_AMOUNT;
-    updateSession(userId, { transferSession });
+    await this.sessionManager.updateSession(userId, { transferSession });
 
     await ctx.reply(
       `💼 Recipient wallet address set to: \`${walletAddress}\`\n\n` +
@@ -431,10 +429,10 @@ export class TransferCommandHandler {
   private async handleAmountInput(
     ctx: Context,
     amountText: string,
-    transferSession: TransferSessionData,
-    updateSession: Function
+    transferSession: TransferSessionData
   ): Promise<boolean> {
     const userId = ctx.from?.id;
+    if (!userId) return false;
 
     const amountPattern = /^\d+(\.\d{1,2})?$/;
     if (!amountPattern.test(amountText)) {
@@ -455,7 +453,7 @@ export class TransferCommandHandler {
     transferSession.amount = amountInSmallestUnit;
     transferSession.step = TransferStep.SEND_PURPOSE;
     transferSession.currency = Currency.USDC; // Default to USDC
-    updateSession(userId, { transferSession });
+    await this.sessionManager.updateSession(userId, { transferSession });
 
     await ctx.reply(
       `💰 Amount set to: *${amountText} USDC*\n\n` +
@@ -481,17 +479,14 @@ export class TransferCommandHandler {
   /**
    * Handle purpose selection from inline keyboard
    */
-  async handlePurposeCallback(
-    ctx: Context,
-    purposeChoice: string,
-    getSession: Function,
-    updateSession: Function
-  ) {
+  async handlePurposeCallback(ctx: Context, purposeChoice: string) {
     try {
       await ctx.answerCbQuery();
 
       const userId = ctx.from?.id;
-      const session = await getSession(userId);
+      if (!userId) return;
+
+      const session = await this.sessionManager.getSession(userId);
 
       if (!session || !session.transferSession) {
         await ctx.reply("Session error. Please try again.");
@@ -534,7 +529,7 @@ export class TransferCommandHandler {
         transferSession.step = TransferStep.WITHDRAW_CONFIRMATION;
       }
 
-      updateSession(userId, { transferSession });
+      await this.sessionManager.updateSession(userId, { transferSession });
 
       // Format amount for display
       const amountValue = parseInt(transferSession.amount!, 10);
@@ -580,10 +575,10 @@ export class TransferCommandHandler {
   private async handleWithdrawWalletAddressInput(
     ctx: Context,
     walletAddress: string,
-    transferSession: TransferSessionData,
-    updateSession: Function
+    transferSession: TransferSessionData
   ): Promise<boolean> {
     const userId = ctx.from?.id;
+    if (!userId) return false;
 
     if (!walletAddress || walletAddress.trim().length < 10) {
       await ctx.reply(
@@ -598,7 +593,7 @@ export class TransferCommandHandler {
     // Update session with wallet address
     transferSession.recipientWalletAddress = walletAddress;
     transferSession.step = TransferStep.WITHDRAW_AMOUNT;
-    updateSession(userId, { transferSession });
+    await this.sessionManager.updateSession(userId, { transferSession });
 
     await ctx.reply(
       `💼 Withdrawal address set to: \`${walletAddress}\`\n\n` +
@@ -616,16 +611,14 @@ export class TransferCommandHandler {
   /**
    * Handle confirmation callback for transfers
    */
-  async handleConfirmTransferCallback(
-    ctx: Context,
-    getSession: Function,
-    updateSession: Function
-  ) {
+  async handleConfirmTransferCallback(ctx: Context) {
     try {
       await ctx.answerCbQuery();
 
       const userId = ctx.from?.id;
-      const session = await getSession(userId);
+      if (!userId) return;
+
+      const session = await this.sessionManager.getSession(userId);
 
       if (!session || !session.transferSession || !session.accessToken) {
         await ctx.reply("Session error. Please try again.");
@@ -638,19 +631,19 @@ export class TransferCommandHandler {
         await this.processSendTransfer(
           ctx,
           transferSession,
-          session.accessToken,
-          updateSession
+          session.accessToken
         );
       } else if (transferSession.step === TransferStep.WITHDRAW_CONFIRMATION) {
         await this.processWithdrawTransfer(
           ctx,
           transferSession,
-          session.accessToken,
-          updateSession
+          session.accessToken
         );
       } else {
         await ctx.reply("Invalid transfer state. Please try again.");
-        updateSession(userId, { transferSession: null });
+        await this.sessionManager.updateSession(userId, {
+          transferSession: null,
+        });
       }
     } catch (error) {
       this.logger.error(
@@ -666,10 +659,10 @@ export class TransferCommandHandler {
   private async processSendTransfer(
     ctx: Context,
     transferSession: TransferSessionData,
-    accessToken: string,
-    updateSession: Function
+    accessToken: string
   ) {
     const userId = ctx.from?.id;
+    if (!userId) return;
 
     try {
       await ctx.reply("⏳ Processing your transaction...");
@@ -726,14 +719,14 @@ export class TransferCommandHandler {
     } catch (error) {
       this.logger.error(`Error processing send transfer: ${error.message}`);
       await ctx.reply(
-        `❌ An error occurred in your transaction. Please try again later.`,
+        `❌ ${error.message}. Please try again later.`,
         Markup.inlineKeyboard([
           [Markup.button.callback("Main Menu", "cmd_menu")],
         ])
       );
     }
 
-    updateSession(userId, { transferSession: null });
+    await this.sessionManager.updateSession(userId, { transferSession: null });
   }
 
   /**
@@ -742,10 +735,10 @@ export class TransferCommandHandler {
   private async processWithdrawTransfer(
     ctx: Context,
     transferSession: TransferSessionData,
-    accessToken: string,
-    updateSession: Function
+    accessToken: string
   ) {
     const userId = ctx.from?.id;
+    if (!userId) return;
 
     try {
       await ctx.reply("⏳ Processing your withdrawal...");
@@ -802,7 +795,7 @@ export class TransferCommandHandler {
       );
     }
 
-    updateSession(userId, { transferSession: null });
+    await this.sessionManager.updateSession(userId, { transferSession: null });
   }
 
   /**
@@ -810,14 +803,14 @@ export class TransferCommandHandler {
    */
   async handleTransferInput(
     ctx: Context,
-    messageText: string,
-    getSession: Function,
-    updateSession: Function
+    messageText: string
   ): Promise<boolean> {
     const userId = ctx.from?.id;
-    const session = await getSession(userId);
+    if (!userId) return false;
 
-    if (!session || !session.transferSession) {
+    const session = await this.sessionManager.getSession(userId);
+
+    if (!session || !session.transferSession || !session.accessToken) {
       return false;
     }
 
@@ -834,8 +827,7 @@ export class TransferCommandHandler {
           ctx,
           messageText,
           transferSession,
-          session.accessToken,
-          updateSession
+          session.accessToken
         );
       }
 
@@ -844,16 +836,14 @@ export class TransferCommandHandler {
           return await this.handleSendEmailRecipientInput(
             ctx,
             messageText,
-            transferSession,
-            updateSession
+            transferSession
           );
 
         case TransferStep.SEND_WALLET_RECIPIENT:
           return await this.handleSendWalletRecipientInput(
             ctx,
             messageText,
-            transferSession,
-            updateSession
+            transferSession
           );
 
         case TransferStep.SEND_AMOUNT:
@@ -861,16 +851,14 @@ export class TransferCommandHandler {
           return await this.handleAmountInput(
             ctx,
             messageText,
-            transferSession,
-            updateSession
+            transferSession
           );
 
         case TransferStep.WITHDRAW_WALLET_ADDRESS:
           return await this.handleWithdrawWalletAddressInput(
             ctx,
             messageText,
-            transferSession,
-            updateSession
+            transferSession
           );
 
         default:

@@ -7,9 +7,9 @@ export class ErrorHandler {
   static handleAxiosError(error: AxiosError): never {
     const status = error.response?.status || HttpStatus.INTERNAL_SERVER_ERROR;
     const message =
-      error.message ||
-      (error.response?.data as any).message ||
-      "An unexpected error occurred";
+      (error.response?.data as any).message || "An unexpected error occurred";
+
+    // console.log(error.response?.data, message, "error.response?.data");
 
     this.logger.error(`API Error: ${status} - ${message}`);
 
@@ -18,9 +18,7 @@ export class ErrorHandler {
 
   static handleGenericError(error: any): never {
     const message =
-      error.message ||
-      error.response?.data?.message ||
-      "An unexpected error occurred";
+      error.response?.data?.message || "An unexpected error occurred";
     this.logger.error(`Generic Error: ${message}`);
 
     throw new HttpException(message, HttpStatus.INTERNAL_SERVER_ERROR);

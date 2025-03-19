@@ -16,7 +16,7 @@ export interface UserSession {
   lastActivity: Date;
   organizationId?: string;
   notificationsEnabled?: boolean;
-  transferSession?: TransferSessionData;
+  transferSession?: TransferSessionData | null;
 }
 
 export interface SessionData {

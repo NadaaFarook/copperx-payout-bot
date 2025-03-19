@@ -1,5 +1,5 @@
 import { Context, Markup } from "telegraf";
-import { Logger } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { TransferService } from "../../transfer/transfer.service";
 import { QuoteService } from "../../quote/quote.service";
 import {
@@ -15,22 +15,26 @@ import {
 import { PublicOfframpQuoteRequestDto } from "src/quote/quote.dto";
 import { Country } from "src/quote/quote.enum";
 import { formatStatus } from "src/common/utils/ui-formatter.util";
+import { SessionManager } from "../session-manager";
 
+@Injectable()
 export class BankWithdrawHandler {
   private readonly logger = new Logger(BankWithdrawHandler.name);
 
   constructor(
     private readonly transferService: TransferService,
-    private readonly quoteService: QuoteService
+    private readonly quoteService: QuoteService,
+    private readonly sessionManager: SessionManager
   ) {}
 
   /**
    * Handle bank withdraw command - Withdraw to bank account
    */
-  async handleBankWithdrawCommand(ctx: Context, updateSession: Function) {
+  async handleBankWithdrawCommand(ctx: Context) {
     const userId = ctx.from?.id;
+    if (!userId) return;
 
-    updateSession(userId, {
+    await this.sessionManager.updateSession(userId, {
       transferSession: {
         step: TransferStep.BANK_WITHDRAW_AMOUNT,
       },
@@ -55,10 +59,10 @@ export class BankWithdrawHandler {
   private async handleBankWithdrawAmountInput(
     ctx: Context,
     amountText: string,
-    transferSession: TransferSessionData,
-    updateSession: Function
+    transferSession: TransferSessionData
   ): Promise<boolean> {
     const userId = ctx.from?.id;
+    if (!userId) return false;
 
     const amountPattern = /^\d+(\.\d{1,2})?$/;
     if (!amountPattern.test(amountText)) {
@@ -78,7 +82,7 @@ export class BankWithdrawHandler {
     transferSession.amount = amountInSmallestUnit;
     transferSession.currency = Currency.USDC; // Default to USD for bank withdrawals
     transferSession.step = TransferStep.BANK_WITHDRAW_COUNTRY;
-    updateSession(userId, { transferSession });
+    await this.sessionManager.updateSession(userId, { transferSession });
 
     await ctx.reply(
       `💰 Amount set to: *${amountText} USDC*\n\n` +
@@ -87,16 +91,12 @@ export class BankWithdrawHandler {
         parse_mode: "Markdown",
         ...Markup.inlineKeyboard([
           [
-            Markup.button.callback("🇺🇸 USA", "country_US"),
-            Markup.button.callback("🇬🇧 UK", "country_GB"),
+            Markup.button.callback("🇬🇧 UK", "country_GBR"),
+            Markup.button.callback("🇮🇳 India", "country_IND"),
           ],
           [
-            Markup.button.callback("🇮🇳 India", "country_IN"),
-            Markup.button.callback("🇪🇺 EU", "country_EU"),
-          ],
-          [
-            Markup.button.callback("🇨🇦 Canada", "country_CA"),
-            Markup.button.callback("🇸🇬 Singapore", "country_SG"),
+            Markup.button.callback("🇨🇦 Canada", "country_CAN"),
+            Markup.button.callback("🇸🇬 Singapore", "country_SGP"),
           ],
           [
             Markup.button.callback(
@@ -114,17 +114,14 @@ export class BankWithdrawHandler {
   /**
    * Handle country selection callback
    */
-  async handleCountryCallback(
-    ctx: Context,
-    countryCode: string,
-    getSession: Function,
-    updateSession: Function
-  ) {
+  async handleCountryCallback(ctx: Context, countryCode: string) {
     try {
       await ctx.answerCbQuery();
 
       const userId = ctx.from?.id;
-      const session = await getSession(userId);
+      if (!userId) return;
+
+      const session = await this.sessionManager.getSession(userId);
 
       if (!session || !session.transferSession || !session.accessToken) {
         await ctx.reply("Session error. Please try again.");
@@ -149,8 +146,7 @@ export class BankWithdrawHandler {
         ctx,
         actualCountryCode,
         transferSession,
-        session.accessToken,
-        updateSession
+        session.accessToken
       );
     } catch (error) {
       this.logger.error(`Error handling country selection: ${error.message}`);
@@ -165,15 +161,16 @@ export class BankWithdrawHandler {
     ctx: Context,
     countryCode: string,
     transferSession: TransferSessionData,
-    accessToken: string,
-    updateSession: Function
+    accessToken: string
   ) {
     const userId = ctx.from?.id;
+    if (!userId) return;
+
     const sourceCountry: Country = Country.NONE;
 
     try {
       transferSession.destinationCountry = countryCode;
-      await updateSession(userId, { transferSession });
+      await this.sessionManager.updateSession(userId, { transferSession });
 
       await ctx.reply("🔄 Requesting quote for your bank withdrawal...");
 
@@ -181,6 +178,7 @@ export class BankWithdrawHandler {
         sourceCountry,
         destinationCountry: countryCode,
         amount: transferSession.amount!,
+        currency: transferSession.currency!,
       };
 
       const quoteResponse = await this.quoteService.getPublicOfframpQuote(
@@ -198,26 +196,38 @@ export class BankWithdrawHandler {
           ])
         );
 
-        updateSession(userId, { transferSession: null });
+        await this.sessionManager.updateSession(userId, {
+          transferSession: null,
+        });
         return;
       }
 
       transferSession.quotePayload = quoteResponse.quotePayload;
       transferSession.quoteSignature = quoteResponse.quoteSignature;
       transferSession.step = TransferStep.BANK_WITHDRAW_PURPOSE;
-      await updateSession(userId, { transferSession });
+      await this.sessionManager.updateSession(userId, { transferSession });
 
-      const minAmount = parseInt(quoteResponse.minAmount) / 100000000;
-      const maxAmount = parseInt(quoteResponse.maxAmount) / 100000000;
+      const quotePayload = JSON.parse(quoteResponse.quotePayload);
+
       const providerName = quoteResponse.provider?.name || "Default Provider";
 
+      const amountToSend = `${parseInt(quotePayload.amount) / 100000000} USD`;
+      const exchangeRate = `USD 1 ≈ ${quotePayload.toCurrency} ${quotePayload.rate}`;
+
+      const processingFee = `USD ${2 + ((1.5 / 100) * parseInt(quotePayload.amount)) / 100000000} (2 USD fixed cost per transaction + 1.5% of the amount)`;
+      const totalAmount = `${quotePayload.toCurrency} ${parseInt(quotePayload.toAmount) / 100000000}`;
+
+      const processingTime = `1-3 business days`;
+
       await ctx.reply(
-        "📋 *Quote Details:*\n\n" +
-          `*Provider:* ${providerName}\n` +
-          `*Minimum Amount:* ${minAmount} USDC\n` +
-          `*Maximum Amount:* ${maxAmount} USDC\n` +
-          `*Expected Arrival:* ${quoteResponse.arrivalTimeMessage || "1-3 business days"}\n\n` +
-          "Please select the purpose of this withdrawal:",
+        `💸 *Bank Withdrawal Quote*\n\n` +
+          `*Amount to Send:* ${amountToSend}\n` +
+          `*Exchange Rate:* ${exchangeRate}\n` +
+          `*Processing Fee:* ${processingFee}\n` +
+          `*Total Recievable:* ${totalAmount}\n` +
+          `*Processing Time:* ${processingTime}\n\n` +
+          `🏦 *Provider:* ${providerName}\n\n` +
+          "Please select the purpose of this bank withdrawal:",
         {
           parse_mode: "Markdown",
           ...Markup.inlineKeyboard([
@@ -246,24 +256,23 @@ export class BankWithdrawHandler {
         ])
       );
 
-      updateSession(userId, { transferSession: null });
+      await this.sessionManager.updateSession(userId, {
+        transferSession: null,
+      });
     }
   }
 
   /**
    * Handle bank withdraw purpose selection
    */
-  async handleBankPurposeCallback(
-    ctx: Context,
-    purposeChoice: string,
-    getSession: Function,
-    updateSession: Function
-  ) {
+  async handleBankPurposeCallback(ctx: Context, purposeChoice: string) {
     try {
       await ctx.answerCbQuery();
 
       const userId = ctx.from?.id;
-      const session = await getSession(userId);
+      if (!userId) return;
+
+      const session = await this.sessionManager.getSession(userId);
 
       if (!session || !session.transferSession) {
         await ctx.reply("Session error. Please try again.");
@@ -294,7 +303,7 @@ export class BankWithdrawHandler {
       transferSession.purposeCode = purposeCode;
       transferSession.sourceOfFunds = SourceOfFunds.SAVINGS; // Default source of funds
       transferSession.step = TransferStep.BANK_WITHDRAW_CONFIRMATION;
-      updateSession(userId, { transferSession });
+      await this.sessionManager.updateSession(userId, { transferSession });
 
       const amountValue = parseInt(transferSession.amount!, 10);
       const formattedAmount = (amountValue / 100000000).toFixed(2);
@@ -325,17 +334,14 @@ export class BankWithdrawHandler {
   /**
    * Handle bank withdraw confirmation
    */
-  async handleBankWithdrawConfirmCallback(
-    ctx: Context,
-    getSession: Function,
-    updateSession: Function
-  ) {
+  async handleBankWithdrawConfirmCallback(ctx: Context) {
     const userId = ctx.from?.id;
+    if (!userId) return;
 
     try {
       await ctx.answerCbQuery();
 
-      const session = await getSession(userId);
+      const session = await this.sessionManager.getSession(userId);
 
       if (!session || !session.transferSession || !session.accessToken) {
         await ctx.reply("Session error. Please try again.");
@@ -400,7 +406,7 @@ export class BankWithdrawHandler {
       );
     }
 
-    updateSession(userId, { transferSession: null });
+    await this.sessionManager.updateSession(userId, { transferSession: null });
   }
 
   /**
@@ -410,8 +416,7 @@ export class BankWithdrawHandler {
     ctx: Context,
     messageText: string,
     transferSession: TransferSessionData,
-    accessToken: string,
-    updateSession: Function
+    accessToken: string
   ): Promise<boolean> {
     try {
       switch (transferSession.step) {
@@ -419,8 +424,7 @@ export class BankWithdrawHandler {
           return await this.handleBankWithdrawAmountInput(
             ctx,
             messageText,
-            transferSession,
-            updateSession
+            transferSession
           );
 
         case TransferStep.BANK_WITHDRAW_COUNTRY:
@@ -439,8 +443,7 @@ export class BankWithdrawHandler {
             ctx,
             countryCode,
             transferSession,
-            accessToken,
-            updateSession
+            accessToken
           );
           return true;
 

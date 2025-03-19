@@ -1,5 +1,5 @@
 import { Markup } from "telegraf";
-import { Logger } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { WalletService } from "src/wallet/wallet.service";
 import {
   formatNetworkName,
@@ -7,6 +7,7 @@ import {
 } from "src/common/utils/ui-formatter.util";
 import { AuthenticatedContext } from "src/auth-middleware";
 
+@Injectable()
 export class WalletCommandHandler {
   private readonly logger = new Logger(WalletCommandHandler.name);
 
