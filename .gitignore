@@ -55,3 +55,4 @@ temp/
 
 # Bot-specific
 sessions.json
+.qodo

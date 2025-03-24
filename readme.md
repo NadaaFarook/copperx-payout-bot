@@ -1,119 +1,114 @@
 # Copperx Telegram Bot
 
-A Telegram bot for Copperx Payout platform that enables user authentication and account management directly from Telegram.
+A friendly Telegram bot that lets Copperx users check balances, send money, and get deposit alerts without opening the web app.
 
-## Features
+Try it out: [t.me/copperx_test_bot](https://t.me/copperx_test_bot)
 
-- User authentication through email OTP
-- View user account information
-- KYC status checking
-- Secure session management
-- User-friendly command interface
+## What can this bot do?
 
-## Technical Stack
+- 🔐 **Log in securely** with email OTP verification
+- 👛 **Check your wallets** and balances across networks
+- 💸 **Send money** to emails or crypto wallets
+- 🏦 **Withdraw funds** to bank accounts
+- 📱 **Get instant alerts** when someone sends you money
+- 📊 **View your recent transactions**
 
-- [NestJS](https://nestjs.com/) - A progressive Node.js framework for building server-side applications
-- [Telegraf](https://telegraf.js.org/) - Modern Telegram Bot API framework for Node.js
-- [Axios](https://axios-http.com/) - Promise based HTTP client for the browser and Node.js
-- [TypeScript](https://www.typescriptlang.org/) - Typed superset of JavaScript
+## Setting up the bot
 
-## Prerequisites
+### You'll need:
 
-- Node.js (v16 or higher)
-- npm (v7 or higher)
-- Telegram Bot Token (obtained from [@BotFather](https://t.me/botfather))
+- Node.js (v16+)
+- Redis (for session storage)
+- A Telegram bot token from BotFather
 
-## Installation
+### Quick setup:
 
-1. Clone the repository:
+1. **Clone and install:**
 
    ```bash
-   git clone https://github.com/your-username/copperx-telegram-bot.git
+   git clone <repo-url>
    cd copperx-telegram-bot
-   ```
-
-2. Install dependencies:
-
-   ```bash
    npm install
    ```
 
-3. Create an environment file by copying the example:
+2. **Create a `.env` file:**
+
+   ```
+   TELEGRAM_BOT_TOKEN=your_bot_token
+   API_BASE_URL=https://income-api.copperx.io
+   REDIS_URL=redis://localhost:6379
+   PUSHER_KEY=e089376087cac1a62785
+   PUSHER_CLUSTER=ap1
+   ```
+
+3. **Start Redis:**
 
    ```bash
-   cp .env.example .env
+   redis-server
    ```
 
-4. Update the `.env` file with your Telegram Bot Token and other configuration:
+4. **Start the bot:**
+   ```bash
+   npm run start:dev   # development
+   # or
+   npm run start:prod  # production
    ```
-   TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
-   API_BASE_URL=https://income-api.copperx.io
-   ```
 
-## Running the Bot
+## Bot commands
 
-### Development Mode
+- `/start` - Welcome message and login
+- `/menu` - Show main menu
+- `/login` - Log in to your Copperx account
+- `/logout` - End your session
+- `/profile` - View your profile
+- `/balance` - Check your wallet balances
+- `/wallets` - See all your wallets
+- `/send` - Send money to someone
+- `/withdraw` - Withdraw to a wallet
+- `/bankwithdraw` - Withdraw to your bank
+- `/transfers` - See your recent transactions
+- `/notifications` - Toggle deposit alerts
+- `/kyc` - Check your KYC status
+- `/help` - Get help with commands
 
-```bash
-npm run start:dev
-```
+## How it connects to Copperx
 
-### Production Mode
+The bot talks to the Copperx API to handle:
 
-```bash
-npm run build
-npm run start:prod
-```
+- **Auth**: Email OTP login, session management
+- **Wallets**: Fetching balances, setting default wallet
+- **Transfers**: Sending money, bank withdrawals
+- **Notifications**: Real-time deposit alerts via Pusher
 
-## Bot Commands
+## Troubleshooting
 
-The bot supports the following commands:
+**Bot not responding?**
 
-- `/start` - Starts the bot and displays welcome message
-- `/help` - Shows the list of available commands
-- `/login` - Initiates the authentication flow
-- `/logout` - Ends the current session
+- Check if your bot token is correct
+- Make sure Redis is running: `redis-cli ping`
 
-## Authentication Flow
+**Login problems?**
 
-1. User initiates the flow with `/login` command
-2. Bot prompts for email address
-3. System sends OTP to the provided email
-4. Bot prompts user to enter the received OTP
-5. System verifies OTP and authenticates the user
-6. Upon successful authentication, user details are displayed
+- Verify your email is registered with Copperx
+- Check if the API is accessible
 
-## Security Features
+**Transfer issues?**
 
-- Secure token storage in session data
-- Input validation for email and OTP
-- Proper error handling and user feedback
-- Session expiry management
-- No plaintext password storage
+- Confirm you have enough balance
+- Make sure your KYC is approved
+- Double-check recipient details
 
-## Project Structure
+## Under the hood
 
-```
-src/
-├── app.module.ts          # Main application module
-├── main.ts                # Application entry point
-├── common/                # Shared utilities, constants, and interceptors
-├── auth/                  # Authentication module with Copperx API integration
-└── bot/                   # Telegram bot implementation and session management
-```
+Built with NestJS and Telegraf, the bot uses a modular architecture:
 
-## Contributing
+- Redis for secure session storage
+- Middleware for auth protection
+- Pusher for real-time notifications
+- Strong typing throughout
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+Security features include token encryption, session timeouts, and transaction confirmations.
 
-## License
+---
 
-This project is proprietary and confidential.
-
-## Support
-
-For support, please reach out to the Copperx community at [Telegram Community](https://t.me/copperxcommunity/2183).
+Made with ❤️ by [Nadaa](nadaa.vervel.app)
